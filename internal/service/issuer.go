@@ -855,6 +855,13 @@ func getEnvForSeed(key string) string {
 }
 
 // mustJSON marshals a value to json.RawMessage, panicking on error (for seed data only).
+//
+// ARCH-L1: panic is correct because mustJSON is invoked only on
+// compile-time-known seed structs — json.Marshal never returns an
+// error for plain struct shapes. A failure here means an upstream
+// type-system mismatch the caller couldn't have caught at build time,
+// which is a programmer bug worth surfacing immediately rather than
+// silently producing malformed seed JSON.
 func mustJSON(v interface{}) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {

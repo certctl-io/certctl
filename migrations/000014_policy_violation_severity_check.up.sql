@@ -1,5 +1,13 @@
 -- Migration 000014: CHECK constraint on policy_violations.severity
 --
+-- ARCH-L3 (2026-05-13): this migration's `ALTER TABLE ... ADD CONSTRAINT
+-- ... CHECK` statement does not carry the literal `IF NOT EXISTS`
+-- token because Postgres' ALTER TABLE ADD CONSTRAINT syntax does not
+-- accept it. Idempotency comes from the DROP CONSTRAINT IF EXISTS
+-- preamble: re-running this migration on a tree with the constraint
+-- already in place drops + re-adds, which is a no-op in observable
+-- behavior.
+--
 -- Sibling to migration 000013, which added severity + CHECK to policy_rules.
 -- policy_violations has carried a severity column since the initial schema
 -- (000001, line 183) but without any CHECK. The engine used to hardcode

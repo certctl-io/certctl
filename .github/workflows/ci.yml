@@ -20,6 +20,11 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5
         with:
           go-version: '1.25.10'
+          # Phase 3 TEST-L1 closure (2026-05-13): enable Go's module +
+          # build cache so re-runs hit the cache instead of recompiling
+          # the world. setup-go v5 cache: true by default; making it
+          # explicit so a future setup-go upgrade can't silently flip it.
+          cache: true
 
       - name: Go Build
         run: |
@@ -103,7 +108,23 @@ jobs:
         run: staticcheck ./...
 
       - name: Race Detection
-        run: go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/... ./internal/connector/... ./internal/crypto/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -timeout 300s
+        # Phase 3 TEST-H1 closure (2026-05-13): the pre-Phase-3 invocation
+        # listed 9 explicit package roots, excluding internal/auth/*,
+        # internal/repository/*, internal/mcp, internal/scep, internal/pkcs7,
+        # internal/api/router, internal/api/acme, internal/cli, internal/cms,
+        # internal/config, internal/deploy, internal/integration,
+        # internal/ratelimit, internal/secret, internal/trustanchor, plus
+        # all of cmd/. Audit finding TEST-H1 flagged this as silent
+        # race-detection drift — packages added after the original list
+        # was authored were never covered.
+        #
+        # Post-Phase-3: ./... with -short. The 76 testing.Short() guards
+        # already in the integration-test surface (testcontainers, live-DB,
+        # multi-process) gate behind this flag, so race detection runs
+        # across every package without dragging in long-running suites.
+        # Timeout doubled from 300s to 600s because ./... is broader; the
+        # broader scope is what makes race coverage trustworthy.
+        run: go test -race -short ./... -count=1 -timeout 600s
 
       - name: Go Test with Coverage
         # internal/ciparity/... — post-v2.1.0 anti-rot item 2 surface-
@@ -174,6 +195,41 @@ jobs:
             echo "::endgroup::"
           done
           exit $fail
+
+  cross-platform-build:
+    # Phase 3 TEST-H2 closure (2026-05-13): the pre-Phase-3 CI ran
+    # exclusively on ubuntu-latest, leaving Windows-specific bugs
+    # (path separators, file permissions, exec.Command semantics)
+    # undetected. The agent + CLI binaries ship for Windows + macOS
+    # users; this matrix asserts they at least BUILD on every OS we
+    # claim to support.
+    #
+    # Build-only — no test run. Full test parity across OSes is a
+    # larger investment (testcontainers is Linux-only on Windows CI
+    # runners, file-permission tests differ, etc.). The build gate
+    # is the minimum that catches the cross-platform regressions
+    # we've seen in practice.
+    name: Cross-platform build (ubuntu / windows / macos)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5
+        with:
+          go-version: '1.25.10'
+          cache: true
+
+      - name: Build server + agent + CLI + mcp-server
+        run: |
+          go build ./cmd/server
+          go build ./cmd/agent
+          go build ./cmd/cli
+          go build ./cmd/mcp-server
 
   cold-db-compose-smoke:
     # Per post-v2.1.0 anti-rot item 6 (Auditable Codebase Bundle).

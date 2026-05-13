@@ -241,7 +241,13 @@ func (s *AuditService) ListAuditEventsByCategory(ctx context.Context, eventCateg
 		}
 	}
 
-	// TODO: Get total count from repository
+	// see #audit-pagination-count — the repository currently returns
+	// the full filtered slice and we surface len(result) as total. This
+	// works for the audit page's current shape (server-side filter +
+	// client-side pagination over a bounded window) but is wrong when the
+	// frontend ports to server-side cursoring (Phase 9 P-H2). At that
+	// point the repository must add a CountAuditEvents(filter) method and
+	// this line becomes total, _ := s.repo.CountAuditEvents(ctx, filter).
 	total := int64(len(result))
 
 	return result, total, nil

@@ -81,6 +81,10 @@ func WithinTx(ctx context.Context, db *sql.DB, fn func(tx *sql.Tx) error) (err e
 	defer func() {
 		if p := recover(); p != nil {
 			_ = tx.Rollback()
+			// ARCH-L1: re-throw the recovered panic after rolling back
+			// the transaction. The Tx layer's contract is "preserve
+			// panics across the rollback boundary"; swallowing here
+			// would hide the original bug from the caller.
 			panic(p)
 		}
 		if err != nil {

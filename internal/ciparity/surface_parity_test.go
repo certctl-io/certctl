@@ -38,6 +38,20 @@ import (
 
 // mcpBaselineFloor — see header doc. Bump when a deletion is
 // deliberate; the diff captures the change.
+//
+// Phase 3 ARCH-H3 reconciliation (2026-05-13): the audit framing
+// "121 vs floor 150 — doc/code drift" was a measurement scoping error
+// — the audit counted only internal/mcp/tools.go (which has 121
+// AddTool calls) and missed the four sibling files listed in
+// mcpToolFiles() below (tools_audit_fix.go + tools_auth.go +
+// tools_auth_bundle2.go + tools_est.go) that add another 34 unique
+// names. Live total: 155 unique `Name: "certctl_*"` declarations
+// across the 5 files, ≥ 150. This test therefore passes today.
+//
+// Bumping the floor: when the catalogue legitimately grows, raise
+// this constant in the same commit that adds the new tools so the
+// floor tracks the ratchet. Lower only when a deletion is intentional
+// and documented in surface-parity-mcp-exemptions.yaml.
 const mcpBaselineFloor = 150
 
 var (

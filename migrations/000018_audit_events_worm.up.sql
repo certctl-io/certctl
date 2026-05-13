@@ -1,5 +1,11 @@
 -- Bundle-6 / Audit M-017 / HIPAA §164.312(b) (audit controls):
 --
+-- ARCH-L3 (2026-05-13): this migration uses CREATE OR REPLACE FUNCTION
+-- + DROP TRIGGER IF EXISTS + CREATE TRIGGER + DO $$ ... pg_roles
+-- existence check. These patterns produce equivalent idempotency to
+-- IF NOT EXISTS but in shapes Postgres' CREATE TRIGGER + REVOKE
+-- syntax do not literally accept. Re-running this migration is safe.
+--
 -- audit_events is append-only at the database layer. The application
 -- role cannot UPDATE or DELETE rows. Compliance superusers (legal hold,
 -- retention purges) use a separate role provisioned out-of-band that

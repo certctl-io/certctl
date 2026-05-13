@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
+.PHONY: help build run test lint verify verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build e2e-test qa-stats
 
 # Default target - show help
 help:
@@ -294,6 +294,19 @@ frontend-build:
 	@echo "Building frontend..."
 	cd web && npm ci && npx vite build
 	@echo "Frontend build complete"
+
+# Phase 3 TEST-M3 closure (2026-05-13): browser-driven E2E smoke
+# target. The full 15-flow suite from web/src/__tests__/e2e/README.md
+# ships in frontend-design-audit Phase 8; this target is the harness
+# wiring that lets `make e2e-test` work today.
+#
+# First-time setup: `cd web && npm install && npx playwright install --with-deps chromium`.
+# The webServer block in web/playwright.config.ts boots `npm run dev`
+# automatically; no separate `make docker-up` needed.
+e2e-test:
+	@echo "Running Playwright E2E (smoke + any *.spec.ts under web/src/__tests__/e2e/)..."
+	cd web && npx playwright test
+	@echo "E2E run complete"
 
 # qa-stats: snapshot of the test-suite size at the current commit.
 # Backend Go tests + subtests + fuzz targets + skipped sites, plus the

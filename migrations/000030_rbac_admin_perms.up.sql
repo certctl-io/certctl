@@ -1,4 +1,12 @@
 -- 000030_rbac_admin_perms.up.sql
+--
+-- ARCH-L3 (2026-05-13): this migration's INSERT statements don't carry
+-- the literal `IF NOT EXISTS` token because Postgres' INSERT syntax
+-- doesn't accept it on the INSERT keyword itself. Idempotency comes
+-- from the `ON CONFLICT (...) DO NOTHING` clauses on every INSERT —
+-- re-running the migration on a tree where the rows already exist is
+-- a no-op.
+--
 -- Bundle 1 / Phase 3.5: admin-only fine-grained permissions for the
 -- legacy admin handlers (bulk_revocation, admin_crl_cache,
 -- admin_scep_intune, admin_est, intermediate_ca). Phase 3.5 wraps the

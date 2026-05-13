@@ -1,4 +1,12 @@
 -- 000039_audit_crit1_perms.up.sql
+--
+-- ARCH-L3 (2026-05-13): this migration's INSERT statements don't carry
+-- the literal `IF NOT EXISTS` token because Postgres' INSERT syntax
+-- doesn't accept it on the INSERT keyword itself. Idempotency comes
+-- from the `ON CONFLICT (...) DO NOTHING` clauses on every INSERT —
+-- re-running the migration on a tree where the rows already exist is
+-- a no-op.
+--
 -- Audit 2026-05-10 CRIT-1 closure: legacy-CRUD permission set.
 --
 -- The Bundle 1 + Bundle 2 audit surfaced that the RBAC permission

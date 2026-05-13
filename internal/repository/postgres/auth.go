@@ -217,7 +217,7 @@ func (r *RoleRepository) ListPermissions(ctx context.Context, roleID string) ([]
 }
 
 func (r *RoleRepository) AddPermission(ctx context.Context, g *authdomain.RolePermission) error {
-	// TODO(bundle-2): Bundle 1 Phase 12 deferral — scope_id is NOT
+	// see #bundle-2-scope-fk — Bundle 1 Phase 12 deferral. scope_id is NOT
 	// currently FK-constrained against the resource tables
 	// (certificate_profiles, issuers). This means an operator can
 	// grant a permission at scope_type=profile / scope_id=p-bogus

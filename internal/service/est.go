@@ -722,6 +722,14 @@ var (
 	serverKeygenSyntheticNotAfter  = mustParseTime("2099-12-31T23:59:59Z")
 )
 
+// mustParseTime parses a hard-coded RFC 3339 string into a time.Time.
+//
+// ARCH-L1: panic is correct because the callers pass only compile-time
+// constants — a parse failure here means the developer typo'd a
+// constant in code, which would never reach a CI build. Surfacing as
+// a panic catches the typo at first-run rather than letting a zero-
+// valued time.Time silently propagate to certificate not-before/after
+// fields.
 func mustParseTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {

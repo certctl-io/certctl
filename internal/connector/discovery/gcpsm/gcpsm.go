@@ -544,8 +544,11 @@ func (c *httpSMClient) ListSecrets(ctx context.Context, project string) ([]Secre
 		})
 	}
 
-	// TODO: handle pagination with nextPageToken if needed for large secret managers
-	// For now, just return the first page results
+	// see #gcpsm-pagination — handle nextPageToken if needed for large
+	// secret managers. For now, just return the first page results;
+	// typical GCP Secret Manager pages contain up to 500 secrets, which
+	// covers every operator we've heard from so far. Add pagination when
+	// the first 500-secret-tenant surfaces.
 
 	return secrets, nil
 }

@@ -48,15 +48,26 @@ jobs:
 
       # --- Static analysis (slow paths) ---
 
-      - name: gosec
-        run: |
-          $(go env GOPATH)/bin/gosec -fmt sarif -out gosec.sarif ./... || true
-        continue-on-error: true
+      - name: gosec (G201/G202/G304/G108 subset — Phase 3 TEST-M2 hard gate)
+        # Phase 3 TEST-M2 closure (2026-05-13): gosec promoted from
+        # continue-on-error (advisory) to blocking on the 4 high-signal
+        # rule subset that targets real prod-bug classes:
+        #   G201 = SQL string formatting (SQL injection)
+        #   G202 = SQL string concatenation (SQL injection)
+        #   G304 = file-path traversal via tainted input
+        #   G108 = profiling endpoint exposed
+        # Other gosec rules (G1xx-G7xx broadly) remain in the SARIF
+        # report but don't gate the build — they have higher false-
+        # positive rates than these 4.
+        run: $(go env GOPATH)/bin/gosec -fmt sarif -out gosec.sarif -include=G201,G202,G304,G108 ./...
 
-      - name: osv-scanner (multi-ecosystem CVE)
-        run: |
-          $(go env GOPATH)/bin/osv-scanner -r --format json --output osv-scanner.json . || true
-        continue-on-error: true
+      - name: osv-scanner (multi-ecosystem CVE — Phase 3 TEST-M2 hard gate)
+        # Phase 3 TEST-M2 closure (2026-05-13): osv-scanner promoted from
+        # advisory to blocking. Complements govulncheck (already blocking
+        # in ci.yml) by covering non-Go dependencies (npm under web/,
+        # any docker base image deps). Findings fail the build; the
+        # exact CVE list lands in osv-scanner.json as a receipt either way.
+        run: $(go env GOPATH)/bin/osv-scanner -r --format json --output osv-scanner.json .
 
       # --- Race detector at -count=10 (D-002) ---
 
@@ -90,14 +101,39 @@ jobs:
         run: go install github.com/zimmski/go-mutesting/cmd/go-mutesting@latest
         continue-on-error: true
 
-      - name: go-mutesting (crypto cluster)
+      - name: go-mutesting (crypto cluster — Phase 3 TEST-M1 hard gate at 55%)
+        # Phase 3 TEST-M1 closure (2026-05-13): go-mutesting promoted
+        # from advisory (continue-on-error + per-package `|| true`) to
+        # blocking with an explicit mutation-score floor of 55%.
+        # Per-package summary lines emit `The mutation score is X.YZ`;
+        # the awk filter extracts each, and the post-loop check fails
+        # the step if any package drops below 0.55.
+        #
+        # Floor rationale: 55% is the starter ratio that catches major
+        # regressions without rejecting the audit's "this is OK" steady
+        # state. Raise quarterly as the test suite hardens; the floor
+        # change ships in the same commit that adds the strengthening
+        # tests so the ratchet is documented.
         run: |
+          set -e
           : > go-mutesting.txt
           for pkg in ./internal/crypto/... ./internal/pkcs7/... ./internal/connector/issuer/local/...; do
             echo "=== $pkg ===" | tee -a go-mutesting.txt
-            $(go env GOPATH)/bin/go-mutesting "$pkg" 2>&1 | tee -a go-mutesting.txt || true
+            $(go env GOPATH)/bin/go-mutesting "$pkg" 2>&1 | tee -a go-mutesting.txt
           done
-        continue-on-error: true
+          # Extract every "The mutation score is X.YZ" line; fail on any
+          # score below 0.55. The check works against floats via awk so
+          # 0.55 is the literal threshold (not a percentage).
+          floor=0.55
+          fail=0
+          while IFS= read -r score; do
+            ok=$(awk -v s="$score" -v f="$floor" 'BEGIN{print (s>=f) ? 1 : 0}')
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::mutation score $score below floor $floor"
+              fail=1
+            fi
+          done < <(grep -oE "The mutation score is [0-9.]+" go-mutesting.txt | awk '{print $NF}')
+          exit $fail
 
       # --- Container + supply chain (D-001 partial, D-006 partial) ---
 
@@ -105,11 +141,21 @@ jobs:
         run: docker build -t certctl:deep-scan .
         continue-on-error: true
 
-      - name: trivy image scan
+      - name: trivy image scan (HIGH+CRITICAL — Phase 3 TEST-M2 hard gate)
+        # Phase 3 TEST-M2 closure (2026-05-13): trivy promoted from
+        # advisory to blocking. --severity filter keeps the gate
+        # noise-free (LOW + MEDIUM findings stay in the JSON receipt
+        # but don't fail the build); --exit-code 1 makes HIGH+CRITICAL
+        # findings the actual gate. Trivy is the third hard deep-scan
+        # gate (alongside gosec + osv-scanner); ZAP / schemathesis /
+        # nuclei / testssl stay advisory because their false-positive
+        # rates on https://localhost:8443-targeted DAST runs are high.
         run: |
           docker run --rm -v "$PWD":/src aquasec/trivy:latest image \
-            --format json --output /src/trivy.json certctl:deep-scan || true
-        continue-on-error: true
+            --format json --output /src/trivy.json \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            certctl:deep-scan
 
       - name: syft SBOM
         run: |

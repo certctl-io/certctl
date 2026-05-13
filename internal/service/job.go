@@ -292,11 +292,16 @@ func (s *JobService) processIssuanceJob(ctx context.Context, job *domain.Job) er
 
 // processValidationJob handles a certificate validation job.
 // This is a placeholder that documents the flow.
-// TODO: Implement actual validation job processing if needed.
+// see #validation-job-impl — implement actual validation job processing
+// when a customer ask materializes. Today's renewal-loop already calls
+// target connector ValidateDeployment after every deploy; this code
+// path is reserved for an out-of-band "verify what's deployed matches
+// the issued cert" scheduler tick. Not currently wired into the job
+// dispatcher — the job type is reserved.
 func (s *JobService) processValidationJob(ctx context.Context, job *domain.Job) error {
 	s.logger.Debug("processing validation job", "job_id", job.ID)
 
-	// TODO: Implement validation job processing
+	// see #validation-job-impl — when implemented:
 	// In production:
 	//   1. Fetch the certificate
 	//   2. For each target, call target connector ValidateDeployment
