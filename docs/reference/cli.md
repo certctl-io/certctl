@@ -153,4 +153,4 @@ The `--wait` flag blocks until the job reaches a terminal state (Completed / Fai
 
 - [`docs/reference/api.md`](api.md) — the OpenAPI 3.1 spec the CLI wraps
 - [`docs/reference/mcp.md`](mcp.md) — the MCP server that exposes the same surface to AI assistants
-- [`docs/contributor/qa-prerequisites.md`](../contributor/qa-prerequisites.md) — local environment setup before the CLI can talk to a server
+- [`docs/getting-started/quickstart.md`](../getting-started/quickstart.md) — local environment setup before the CLI can talk to a server

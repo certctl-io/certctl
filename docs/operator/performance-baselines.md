@@ -101,6 +101,5 @@ Capture timing in your own loadtest-baselines log so future regressions surface 
 
 ## Related docs
 
-- [`docs/contributor/ci-pipeline.md`](../contributor/ci-pipeline.md) — CI guard for performance regression
 - [`docs/operator/security.md`](security.md) — rate limit tuning
 - [`docs/reference/architecture.md`](../reference/architecture.md) — request path through handler → service → repository

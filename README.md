@@ -35,7 +35,6 @@ The full audience-organized index lives at [`docs/README.md`](docs/README.md). T
 | Production operator | [Architecture](docs/reference/architecture.md) → [Security posture](docs/operator/security.md) → [Disaster recovery runbook](docs/operator/runbooks/disaster-recovery.md) |
 | PKI engineer | [ACME server](docs/reference/protocols/acme-server.md) → [SCEP server](docs/reference/protocols/scep-server.md) → [EST server](docs/reference/protocols/est.md) → [CA hierarchy](docs/reference/intermediate-ca-hierarchy.md) |
 | Migrating from another tool | [from certbot](docs/migration/from-certbot.md) / [from acme.sh](docs/migration/from-acmesh.md) / [cert-manager coexistence](docs/migration/cert-manager-coexistence.md) |
-| Contributor | [Architecture](docs/reference/architecture.md) → [Testing strategy](docs/contributor/testing-strategy.md) → [CI pipeline](docs/contributor/ci-pipeline.md) |
 
 For the connector reference (12 issuers, 15 targets, 6 notifiers) see [`docs/reference/connectors/index.md`](docs/reference/connectors/index.md).
 
@@ -174,8 +173,6 @@ make docker-up          # Start Docker Compose stack
 ```
 
 CI runs `go vet`, `go test -race`, `golangci-lint`, `govulncheck`, and per-package coverage thresholds (service 70%, handler 75%, crypto 88%, auth packages 85-95%) on every push. The thresholds-as-data file is `.github/coverage-thresholds.yml`; lowering a floor requires corresponding test work, not a config flip. Frontend CI runs TypeScript type checking, Vitest tests, and Vite production build.
-
-For the full contributor guide see [`docs/contributor/`](docs/contributor/) — testing strategy, test environment, CI pipeline, QA prerequisites.
 
 ## License
 

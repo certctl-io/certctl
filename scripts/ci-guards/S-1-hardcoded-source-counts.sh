@@ -14,8 +14,7 @@
 #
 # Allowed surfaces: demo-fixture prose in README ("32
 # certificates" — those are seed_demo.sql facts, not live
-# source counts), historical-milestone counts in
-# WORKSPACE-CHANGELOG.md, the testing-guide example phrasing
+# source counts), the testing-guide example phrasing
 # ("README claims 8 issuer connectors but only 6 exist"),
 # and any number that quotes the source command immediately
 # adjacent.
@@ -27,7 +26,7 @@
 set -e
 BAD=$(grep -rnE '\b[0-9]+\s+(issuer connectors?|target connectors?|notifier connectors?|discovery connectors?|MCP tools|OpenAPI operations|migrations|database tables|frontend pages|HTTP routes)\b' \
     README.md docs/ 2>/dev/null \
-    | grep -vE 'WORKSPACE-CHANGELOG|seed_demo|demo override' \
+    | grep -vE 'seed_demo|demo override' \
     | grep -vE 'DRIFT HAZARD|Source: |Rebuild|rebuild via|grep -|wc -l|ls -d|find ' \
     | grep -vE 'README claims [0-9]+ issuer connectors but only [0-9]+ exist' \
     || true)

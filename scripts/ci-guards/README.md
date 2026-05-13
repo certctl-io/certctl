@@ -41,8 +41,6 @@ Current helpers:
   `PR_NUMBER` + `GH_TOKEN` env from the go-build-and-test job
 - `scripts/check-coverage-thresholds.sh` — consumes `coverage.out`
   + `.github/coverage-thresholds.yml`
-- `scripts/qa-doc-part-count.sh` + `scripts/qa-doc-seed-count.sh` —
-  invoked via `make verify-docs` pre-tag, not in CI
 
 ## Adding a new guard
 
@@ -97,12 +95,6 @@ The cold-DB compose smoke (post-v2.1.0 / item-6) is NOT a script in this directo
 
 The fourth Bundle artifact (`internal/ciparity/`) is Go tests, not shell guards — runs under the standard Go test step. Pins the MCP tool catalogue floor + naming convention; reports CLI/MCP/OpenAPI surface counts as a trend metric.
 
-## Guards explicitly NOT here
-
-- **`QA-doc Part-count drift`** + **`QA-doc seed-count drift`** — these
-  protect docs-the-operator-reads, not anything the product depends on.
-  Moved to `make verify-docs` (operator runs pre-tag, not on every push).
-  See the ci-pipeline-cleanup spec, Phase 11.
 
 ## Running the full set locally
 

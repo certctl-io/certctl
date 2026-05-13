@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify verify-docs verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
+.PHONY: help build run test lint verify verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
 
 # Default target - show help
 help:
@@ -16,7 +16,6 @@ help:
 	@echo "  make lint           Run linter (golangci-lint)"
 	@echo "  make fmt            Format code with gofmt"
 	@echo "  make verify         Pre-commit gate: fmt + vet + lint + test (CI-parity)"
-	@echo "  make verify-docs    Pre-tag gate:    QA-doc drift checks (operator-facing docs)"
 	@echo "  make verify-deploy  Pre-push gate:   digest validity + OpenAPI parity + docker build smoke"
 	@echo "  make loadtest       k6 throughput run against postgres + certctl (NOT in verify; manual + cron only)"
 	@echo ""
@@ -118,23 +117,6 @@ verify:
 	@go test -short -count=1 ./...
 	@echo ""
 	@echo "verify: PASS — safe to commit"
-
-# verify-docs: pre-tag gate. Runs the QA-doc seed-count drift guard
-# that ci-pipeline-cleanup Phase 11 / frozen decision 0.13 moved out
-# of CI (was per-push blocking; now operator-runs pre-tag). Protects
-# docs/contributor/qa-test-suite.md::Seed Data Reference from
-# drifting vs migrations/seed_demo.sql. Operator-facing docs only —
-# not product-affecting.
-#
-# The QA-doc Part-count drift guard retired in the 2026-05-04 docs
-# overhaul Phase 5 when docs/testing-guide.md was pruned (its content
-# dispersed across the audience-organized doc tree); the Part-count
-# class no longer exists outside the qa_test.go file itself.
-verify-docs:
-	@echo "==> QA-doc seed-count drift"
-	@bash scripts/qa-doc-seed-count.sh
-	@echo ""
-	@echo "verify-docs: PASS — safe to tag"
 
 # verify-deploy: optional pre-push gate. Runs the digest-validity check,
 # the OpenAPI ↔ handler parity check, and a Docker build smoke for the
@@ -313,13 +295,10 @@ frontend-build:
 	cd web && npm ci && npx vite build
 	@echo "Frontend build complete"
 
-# QA Suite Stats — Bundle P / Strengthening #8.
-# Single source-of-truth for every count claim in
-# docs/contributor/qa-test-suite.md. The Strengthening #6 CI drift guards
-# (now scoped to the seed-count class only — the Part-count class retired
-# in the 2026-05-04 docs overhaul Phase 5 when testing-guide.md was
-# pruned) consume the same numbers, eliminating the doc-drift class
-# structurally.
+# qa-stats: snapshot of the test-suite size at the current commit.
+# Backend Go tests + subtests + fuzz targets + skipped sites, plus the
+# seed-data counts in migrations/seed_demo.sql. Useful before a release
+# to spot-check that no whole layer dropped off.
 qa-stats:
 	@echo "=== certctl QA Suite Stats ==="
 	@echo "Date: $$(date +%Y-%m-%d)"

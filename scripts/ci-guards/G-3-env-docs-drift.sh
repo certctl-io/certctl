@@ -24,14 +24,19 @@
 # cat-g-* for closure rationale.
 
 set -e
-# Defined: config.go + agent + cli + mcp-server + server cmds + test fixtures + ACME DNS export
+# Defined: any CERTCTL_* env-var name appearing in production Go sources
+# (cmd/ + internal/, excluding *_test.go) plus the ACME DNS-01 script-
+# export surface. Test files use `t.Setenv` on env-var names that aren't
+# necessarily operator config; harness-only names should not flag.
 {
-  grep -nE '"CERTCTL_[A-Z_]+"' internal/config/config.go | sed -E 's/.*"(CERTCTL_[A-Z_]+)".*/\1/'
-  grep -rhoE '"CERTCTL_[A-Z_]+"' cmd/agent/*.go cmd/cli/*.go cmd/mcp-server/*.go cmd/server/*.go 2>/dev/null | sed -E 's/"(CERTCTL_[A-Z_]+)"/\1/'
-  grep -rhoE 'CERTCTL_[A-Z_]+' deploy/test/qa_test.go internal/connector/issuer/acme/dns.go 2>/dev/null
+  grep -rhoE '"CERTCTL_[A-Z_]+"' --include='*.go' --exclude='*_test.go' cmd/ internal/ 2>/dev/null | sed -E 's/"(CERTCTL_[A-Z_]+)"/\1/'
+  grep -rhoE 'CERTCTL_[A-Z_]+' internal/connector/issuer/acme/dns.go 2>/dev/null
 } | grep -E '^CERTCTL_' | sort -u > /tmp/g3-defined.txt
-# Documented: README + docs + helm
-grep -rhoE '\bCERTCTL_[A-Z_]+\b' README.md docs/ deploy/helm/ 2>/dev/null | sort -u > /tmp/g3-docs.txt
+# Documented: README + docs + helm + deploy/ENVIRONMENTS.md.
+# (ENVIRONMENTS.md is the canonical env-var inventory; the rest of
+# deploy/ contains compose/test fixtures whose env-var mentions are
+# implementation noise, not operator documentation.)
+grep -rhoE '\bCERTCTL_[A-Z_]+\b' README.md docs/ deploy/helm/ deploy/ENVIRONMENTS.md 2>/dev/null | sort -u > /tmp/g3-docs.txt
 # Allowlist of env vars documented as external integration contracts.
 # Each entry justifies itself in one line; if you add to this list,
 # add the justification.
@@ -59,6 +64,8 @@ CERTCTL_AUDIT_EXCLUDE_PATHS|
 CERTCTL_TLS_|
 CERTCTL_TLS_INSECURE_SKIP_VERIFY|
 CERTCTL_SCEP_|
+CERTCTL_SCEP_PROFILE_[A-Z_]+|
+CERTCTL_EST_PROFILE_[A-Z_]+|
 CERTCTL_SERVER_CA_BUNDLE_PATH|
 CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY|
 CERTCTL_QA_[A-Z_]+|
@@ -89,7 +96,11 @@ CERTCTL_RATE_LIMIT_
 # the documented external contracts here.
 ALLOWED_FLAT=$(echo "$ALLOWED" | tr -d '\n ')
 DOCS_ONLY=$(comm -13 /tmp/g3-defined.txt /tmp/g3-docs.txt | grep -vE "$ALLOWED_FLAT" || true)
-CONFIG_ONLY=$(comm -23 /tmp/g3-defined.txt /tmp/g3-docs.txt || true)
+# Apply the same allowlist to the CONFIG_ONLY direction so dynamic
+# per-profile dispatch surfaces (CERTCTL_SCEP_PROFILE_<NAME>_*, etc.)
+# aren't flagged as "defined but never documented" — they can't all
+# be enumerated in a static doc.
+CONFIG_ONLY=$(comm -23 /tmp/g3-defined.txt /tmp/g3-docs.txt | grep -vE "$ALLOWED_FLAT" || true)
 if [ -n "$DOCS_ONLY" ]; then
   echo "::error::G-3 regression: env var(s) mentioned in docs but not defined in Go source AND not in the documented integration-surface allowlist:"
   echo "$DOCS_ONLY"

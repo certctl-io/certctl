@@ -440,6 +440,7 @@ Every `CERTCTL_*` environment variable is read by the server's `internal/config/
 | `CERTCTL_ACME_CHALLENGE_TYPE` | `http-01`, `dns-01`, or `dns-persist-01` |
 | `CERTCTL_ACME_INSECURE` | Skip TLS verification for ACME CA (test only) |
 | `CERTCTL_ACME_EAB_KID` / `CERTCTL_ACME_EAB_HMAC` | External Account Binding for ZeroSSL, Google Trust Services |
+| `CERTCTL_ZEROSSL_EAB_URL` | Override the ZeroSSL EAB-credentials endpoint (defaults to the public ZeroSSL URL; only set for ZeroSSL staging or a private mirror) |
 | `CERTCTL_ACME_ARI_ENABLED` | Enable RFC 9773 Renewal Information |
 | `CERTCTL_ACME_PROFILE` | ACME profile (`tlsserver`, `shortlived`) |
 | `CERTCTL_STEPCA_URL` | step-ca server URL |
