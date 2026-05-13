@@ -93,3 +93,12 @@ Thumbs.db
 # rebuilds from source via multi-stage build (deploy/test/f5-mock-icontrol/
 # Dockerfile line 13). The compiled ELF must not be tracked.
 deploy/test/f5-mock-icontrol/f5-mock-icontrol
+
+# Phase 0 closure (2026-05-13): cowork/ holds the operator's internal
+# legal / audit / strategy artifacts (counsel-signed AI-authorship
+# declaration, filter-repo callback, pre-rewrite bundle, audit HTML
+# scratch). It is private operator scratch space and must never
+# accidentally land in the public repo. See
+# docs/history-normalization.md for the public-facing description of
+# the Phase 0 git-history rewrite.
+cowork/
