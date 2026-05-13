@@ -432,15 +432,25 @@ jobs:
       # configured. Every lint/template invocation below must pick exactly one
       # provisioning mode — see deploy/helm/certctl/templates/_helpers.tpl
       # (certctl.tls.required) and docs/operator/tls.md.
+      #
+      # Bundle 3 closure (2026-05-12, commit f1fa311): the chart now ALSO
+      # fails render when (a) server.auth.type=api-key + apiKey empty, or
+      # (b) postgresql.enabled=true + postgresql.auth.password empty.
+      # Every positive render below MUST pass both secrets; inverse tests
+      # at the bottom of this job pin the fail-fast guards in place.
       - name: Lint Helm Chart
         run: |
           helm lint deploy/helm/certctl/ \
-            --set server.tls.existingSecret=certctl-tls-ci
+            --set server.tls.existingSecret=certctl-tls-ci \
+            --set server.auth.apiKey=ci-api-key-placeholder \
+            --set postgresql.auth.password=ci-postgres-placeholder
 
       - name: Template Helm Chart (existingSecret mode)
         run: |
           helm template certctl deploy/helm/certctl/ \
             --set server.tls.existingSecret=certctl-tls-ci \
+            --set server.auth.apiKey=ci-api-key-placeholder \
+            --set postgresql.auth.password=ci-postgres-placeholder \
             > /dev/null
 
       - name: Template Helm Chart (cert-manager mode)
@@ -448,7 +458,29 @@ jobs:
           helm template certctl deploy/helm/certctl/ \
             --set server.tls.certManager.enabled=true \
             --set server.tls.certManager.issuerRef.name=letsencrypt-prod \
+            --set server.auth.apiKey=ci-api-key-placeholder \
+            --set postgresql.auth.password=ci-postgres-placeholder \
             > /dev/null
+
+      - name: Template Helm Chart (external Postgres mode — Bundle 3 D2)
+        run: |
+          # Closes Bundle 3 D2: postgresql.enabled=false must (a) render
+          # cleanly with externalDatabase.url and (b) emit ZERO postgres-*
+          # templates. The render output is grep-checked below.
+          out=$(helm template certctl deploy/helm/certctl/ \
+            --set server.tls.existingSecret=certctl-tls-ci \
+            --set postgresql.enabled=false \
+            --set externalDatabase.url='postgres://u:p@db.example.com:5432/certctl?sslmode=require' \
+            --set server.auth.apiKey=ci-api-key-placeholder)
+          # Bundled-Postgres resources must not appear when postgresql.enabled=false.
+          if echo "$out" | grep -qE "^kind: StatefulSet$"; then
+            echo "::error::Bundle 3 D2 regression: postgres StatefulSet rendered with postgresql.enabled=false"
+            exit 1
+          fi
+          if echo "$out" | grep -q "postgres-secret.yaml"; then
+            echo "::error::Bundle 3 D2 regression: postgres-secret rendered with postgresql.enabled=false"
+            exit 1
+          fi
 
       - name: Template Helm Chart (guard fails without TLS)
         run: |
@@ -457,6 +489,58 @@ jobs:
           # in certctl.tls.required has regressed.
           if helm template certctl deploy/helm/certctl/ > /dev/null 2>&1; then
             echo "::error::Helm chart rendered without a TLS source — fail-loud guard regressed"
+            exit 1
+          fi
+
+      - name: Template Helm Chart (guard fails — Bundle 3 D7 TLS both-set)
+        run: |
+          # Bundle 3 D7: setting BOTH existingSecret AND certManager.enabled
+          # creates two conflicting TLS sources of truth. Chart must refuse.
+          if helm template certctl deploy/helm/certctl/ \
+                --set server.tls.existingSecret=ci \
+                --set server.tls.certManager.enabled=true \
+                --set server.tls.certManager.issuerRef.name=foo \
+                --set server.auth.apiKey=k \
+                --set postgresql.auth.password=p \
+                > /dev/null 2>&1; then
+            echo "::error::Bundle 3 D7 regression: chart rendered with BOTH TLS sources configured"
+            exit 1
+          fi
+
+      - name: Template Helm Chart (guard fails — Bundle 3 D1 missing apiKey)
+        run: |
+          # Bundle 3 D1: missing server.auth.apiKey when auth.type=api-key
+          # must fail at template time, not silently render an empty Secret.
+          if helm template certctl deploy/helm/certctl/ \
+                --set server.tls.existingSecret=ci \
+                --set postgresql.auth.password=p \
+                > /dev/null 2>&1; then
+            echo "::error::Bundle 3 D1 regression: chart rendered with empty server.auth.apiKey"
+            exit 1
+          fi
+
+      - name: Template Helm Chart (guard fails — Bundle 3 D1 missing pg password)
+        run: |
+          # Bundle 3 D1: missing postgresql.auth.password when postgresql.enabled=true
+          # must fail at template time, not silently use a fallback default.
+          if helm template certctl deploy/helm/certctl/ \
+                --set server.tls.existingSecret=ci \
+                --set server.auth.apiKey=k \
+                > /dev/null 2>&1; then
+            echo "::error::Bundle 3 D1 regression: chart rendered with empty postgresql.auth.password"
+            exit 1
+          fi
+
+      - name: Template Helm Chart (guard fails — Bundle 3 D1 missing external DB URL)
+        run: |
+          # Bundle 3 D1: missing externalDatabase.url when postgresql.enabled=false
+          # must fail at template time.
+          if helm template certctl deploy/helm/certctl/ \
+                --set server.tls.existingSecret=ci \
+                --set postgresql.enabled=false \
+                --set server.auth.apiKey=k \
+                > /dev/null 2>&1; then
+            echo "::error::Bundle 3 D1 regression: chart rendered with postgresql.enabled=false + empty externalDatabase.url"
             exit 1
           fi
 
