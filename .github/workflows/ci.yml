@@ -346,6 +346,16 @@ jobs:
           # demo-mode or api-key, so the overlay is acceptable here.
           COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.demo.yml)
 
+          # Phase 2 SEC-H3 (2026-05-13): the demo overlay sets
+          # CERTCTL_DEMO_MODE_ACK=true; the SEC-H3 fail-closed guard
+          # requires a paired CERTCTL_DEMO_MODE_ACK_TS within the last
+          # 24h (a static YAML value would rot). The overlay reads
+          # ${CERTCTL_DEMO_MODE_ACK_TS:-} from the shell, so we mint a
+          # fresh timestamp here and export it for every compose
+          # invocation in this job (initial up-d AND the force-recreate
+          # at step 4).
+          export CERTCTL_DEMO_MODE_ACK_TS="$(date +%s)"
+
           log "1/4 down -v --remove-orphans"
           docker compose "${COMPOSE_FILES[@]}" down -v --remove-orphans 2>&1 | tail -3 || true
 
@@ -359,7 +369,15 @@ jobs:
 
           log "4/4 minting day-0 admin (proves migration ladder + bootstrap path)"
           TOKEN="$(openssl rand -base64 32 | tr -d '\n')"
-          echo "CERTCTL_BOOTSTRAP_TOKEN=$TOKEN" > /tmp/_smoke.env
+          {
+            echo "CERTCTL_BOOTSTRAP_TOKEN=$TOKEN"
+            # Re-emit the demo-mode ACK TS into the --env-file so the
+            # force-recreate at step 4 inherits it. `--env-file` REPLACES
+            # the shell-env source for variable interpolation on compose
+            # operations that use it, so omitting this line would re-trip
+            # the SEC-H3 guard.
+            echo "CERTCTL_DEMO_MODE_ACK_TS=$CERTCTL_DEMO_MODE_ACK_TS"
+          } > /tmp/_smoke.env
           docker compose "${COMPOSE_FILES[@]}" --env-file /tmp/_smoke.env up -d --force-recreate certctl-server 2>&1 | tail -2
           sleep 5
           wait_for_service_healthy certctl-server

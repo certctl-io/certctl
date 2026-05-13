@@ -5,8 +5,15 @@
 # Layered on top of the production-shaped base (docker-compose.yml) to give
 # operators a one-command, zero-config demo path:
 #
-#   docker compose -f deploy/docker-compose.yml \
-#                  -f deploy/docker-compose.demo.yml up -d --build
+#   deploy/demo-up.sh -d --build
+#
+# (which forwards args to `docker compose up` after exporting the fresh
+# CERTCTL_DEMO_MODE_ACK_TS that Phase 2 SEC-H3 requires). Equivalent
+# manual invocation:
+#
+#   CERTCTL_DEMO_MODE_ACK_TS=$(date +%s) docker compose \
+#     -f deploy/docker-compose.yml \
+#     -f deploy/docker-compose.demo.yml up -d --build
 #
 # What this overlay does:
 #
@@ -14,6 +21,10 @@
 #      request is served as the synthetic admin actor `actor-demo-anon`;
 #      the server emits a prominent ⚠ DEMO MODE WARN banner at boot with
 #      a production-promotion checklist (cmd/server/main.go::emitDemoBanner).
+#      Phase 2 SEC-H3 (2026-05-13) pairs DEMO_MODE_ACK with a required
+#      DEMO_MODE_ACK_TS within the last 24h. The overlay reads
+#      ${CERTCTL_DEMO_MODE_ACK_TS:-} from the shell — use deploy/demo-up.sh
+#      (which exports a fresh TS) instead of bare `docker compose up`.
 #
 #   2. Flips CERTCTL_KEYGEN_MODE=server (the demo issues + holds the key on
 #      the server to keep the dashboard populated; production deploys must
@@ -48,8 +59,7 @@
 # To start fresh (wipe previous data):
 #   docker compose -f deploy/docker-compose.yml \
 #                  -f deploy/docker-compose.demo.yml down -v
-#   docker compose -f deploy/docker-compose.yml \
-#                  -f deploy/docker-compose.demo.yml up -d --build
+#   deploy/demo-up.sh -d --build
 
 services:
   postgres:
@@ -67,6 +77,17 @@ services:
       # reminds the operator on every start.
       CERTCTL_AUTH_TYPE: none
       CERTCTL_DEMO_MODE_ACK: "true"
+      # Phase 2 SEC-H3 (2026-05-13): DEMO_MODE_ACK=true requires a fresh
+      # DEMO_MODE_ACK_TS within the last 24h. The overlay can't hardcode
+      # a timestamp (it would rot the next day), so we passthrough from
+      # the shell. Operators set this via:
+      #     CERTCTL_DEMO_MODE_ACK_TS=$(date +%s) docker compose \
+      #       -f docker-compose.yml -f docker-compose.demo.yml up -d
+      # The cold-DB smoke + any helper script (deploy/demo-up.sh, when
+      # it lands) export this before invoking compose. Empty value
+      # fails the SEC-H3 guard with a clear operator-facing error
+      # message pointing at this line.
+      CERTCTL_DEMO_MODE_ACK_TS: "${CERTCTL_DEMO_MODE_ACK_TS:-}"
       # Server-side keygen so the demo can populate the dashboard with
       # full lifecycle history. Production deploys leave this at the
       # code default `agent` (CertctlAgent generates ECDSA P-256 keys
