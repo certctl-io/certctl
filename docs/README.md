@@ -66,6 +66,7 @@ You're running certctl in production and need operational guidance.
 |---|---|
 | [Security posture](operator/security.md) | Auth, rate limits, encryption at rest, key rotation, RBAC + OIDC + sessions + break-glass, bootstrap |
 | [Secret custody](operator/secret-custody.md) | Where private keys live; FileDriver vs HSM/KMS; encryption wire format; env-seeded vs DB-seeded plaintext policy |
+| [Observability](operator/observability.md) | Metrics surface, Prometheus exposition vs client_golang, tracing scope, log structure, rate-limit semantics across restarts/replicas |
 | [RBAC operator reference](operator/rbac.md) | Roles, permissions, scopes, scope-down + day-0 bootstrap |
 | [Auth threat model](operator/auth-threat-model.md) | API-key + RBAC + OIDC + sessions + break-glass — token forgery, session hijacking, IdP compromise, role-grant abuse, bootstrap-token leak, audit-mutation |
 | [OIDC / SSO runbooks](operator/oidc-runbooks/index.md) | Per-IdP setup guides — Keycloak, Authentik, Okta, Auth0, Entra ID, Google Workspace |
@@ -85,6 +86,7 @@ You're running certctl in production and need operational guidance.
 | [Expiry alerts](operator/runbooks/expiry-alerts.md) | Per-policy multi-channel routing matrix, severity tiers |
 | [Disaster recovery](operator/runbooks/disaster-recovery.md) | CRL cache, OCSP responder cert, CA private-key rotation, Postgres restore |
 | [Config-encryption upgrade](operator/runbooks/config-encryption-upgrade.md) | Force v1/v2 → v3 re-seal across the database; passphrase rotation procedure |
+| [PostgreSQL backup](operator/runbooks/postgres-backup.md) | Operator-run backup recipe (docker-compose + Kubernetes); recommended cadence; quarterly DR dry-run |
 
 ## Migration
 
