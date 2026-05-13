@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package awsacm implements a target.Connector for deploying certificates to
 // AWS Certificate Manager (ACM). ACM is the public AWS service for storing
 // TLS certificates that AWS-managed TLS-termination endpoints (Application

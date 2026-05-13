@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package mtlscache caches a parsed mTLS keypair plus a precomputed
 // *http.Transport across API calls in connectors that authenticate via
 // client certificates. RefreshIfStale stats the cert file on the

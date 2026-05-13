@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package domain holds the OIDC integration's persisted-shape types.
 //
 // Auth Bundle 2 Phase 1: types only, no service or repository wiring.

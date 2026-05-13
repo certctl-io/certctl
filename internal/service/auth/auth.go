@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package auth holds the RBAC service layer: PermissionService,
 // RoleService, ActorRoleService, and the Authorizer primitive that
 // Phase 3 middleware (auth.RequirePermission) calls on every gated

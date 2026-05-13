@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package domain — error sentinels.
 //
 // S-2 closure (cat-s6-efc7f6f6bd50): pre-S-2 every handler-side

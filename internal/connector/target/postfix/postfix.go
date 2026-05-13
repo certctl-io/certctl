@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package postfix implements the Postfix + Dovecot mail-server
 // target connector. As of the deploy-hardening I master bundle
 // Phase 7, both modes follow the canonical NGINX template:

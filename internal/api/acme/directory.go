@@ -1,5 +1,5 @@
-// Copyright (c) certctl
-// SPDX-License-Identifier: BSL-1.1
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
 
 // Package acme implements the ACME server-side protocol surface (RFC 8555
 // + RFC 9773 ARI). It is deliberately separate from

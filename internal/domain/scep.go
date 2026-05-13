@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package domain
 
 // SCEPEnrollResult holds the result of a SCEP (RFC 8894) enrollment operation.

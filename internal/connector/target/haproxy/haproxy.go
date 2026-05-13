@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package haproxy implements the HAProxy target connector.
 //
 // HAProxy expects all TLS material concatenated in a single PEM

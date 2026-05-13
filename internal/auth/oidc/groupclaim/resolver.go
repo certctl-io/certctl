@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package groupclaim resolves the operator-configured `groups_claim_path`
 // against an ID token's parsed claims, returning the user's group
 // membership as a `[]string`.

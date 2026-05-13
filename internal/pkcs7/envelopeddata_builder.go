@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // EnvelopedData BUILDER (inverse of envelopeddata.go's parser+decryptor).
 //
 // EST RFC 7030 hardening master bundle Phase 5.2.

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package trustanchor provides a SIGHUP-reloadable PEM-bundle trust pool
 // shared by the SCEP/Intune dispatcher (per-profile Microsoft Intune
 // Connector signing-cert anchor), the EST mTLS sibling route (per-profile

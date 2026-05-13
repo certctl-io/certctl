@@ -1,5 +1,5 @@
-// Copyright (c) certctl
-// SPDX-License-Identifier: BSL-1.1
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
 
 // WithinTx is the transactional spine for any service-layer operation
 // whose audit row must be atomic with the underlying state change.

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package oidc — Bundle 2 Phase 5 / pre-login cookie machinery.
 //
 // This file implements the production-side PreLoginStore that the

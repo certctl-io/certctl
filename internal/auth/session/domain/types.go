@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package domain holds the session-management persisted-shape types.
 //
 // Auth Bundle 2 Phase 1: types only. Phase 2 ships the SQL migration;

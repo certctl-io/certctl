@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package oidc — Auth Bundle 2 Phase 7 / OIDC bootstrap hook.
 //
 // Phase 7 ships the "first OIDC login matching CERTCTL_BOOTSTRAP_ADMIN_GROUPS

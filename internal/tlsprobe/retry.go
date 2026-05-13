@@ -1,7 +1,5 @@
-// Copyright (c) 2025 Certctl Contributors <certctl@proton.me>
-//
-// SPDX-License-Identifier: BSL-1.1
-// See COPYING for license details.
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
 
 package tlsprobe
 

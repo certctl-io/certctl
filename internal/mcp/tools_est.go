@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package mcp
 
 // EST RFC 7030 hardening master bundle Phase 9.2 — MCP tools.

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package deploy provides the shared atomic-write + validate + rollback
 // primitive consumed by every target connector under
 // internal/connector/target/*.

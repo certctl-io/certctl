@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package ejbca implements the issuer.Connector interface for EJBCA (Keyfactor).
 //
 // EJBCA is an open-source and enterprise certificate authority platform.

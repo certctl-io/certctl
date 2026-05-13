@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package ssh implements a target.Connector for agentless certificate deployment
 // via SSH/SFTP. This enables the "proxy agent" pattern — a certctl agent in the
 // same network zone deploys certificates to remote servers without requiring the

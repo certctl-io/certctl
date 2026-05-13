@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package googlecas implements the issuer.Connector interface for
 // Google Cloud Certificate Authority Service (CAS).
 //

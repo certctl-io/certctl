@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package validation provides security-focused input validation functions for certctl.
 //
 // This package enforces strict input validation to prevent injection attacks,

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package stepca implements the issuer.Connector interface for Smallstep step-ca
 // private certificate authority.
 //

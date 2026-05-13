@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package handler
 
 // Audit 2026-05-10 MED-11 closure — federated-user admin surface.

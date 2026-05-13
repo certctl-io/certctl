@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package handler — Auth Bundle 2 Phase 7.5 / break-glass admin HTTP surface.
 //
 // 4 endpoints across two access levels:

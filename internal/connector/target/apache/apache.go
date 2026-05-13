@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package apache implements the Apache httpd target connector.
 // As of the deploy-hardening I master bundle Phase 5, Apache
 // follows the canonical pattern established by NGINX (Phase 4):

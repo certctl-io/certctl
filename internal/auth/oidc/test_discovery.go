@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package oidc
 
 // Audit 2026-05-10 MED-5 closure — dry-run validator for OIDC provider

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package certutil provides shared certificate utility functions for target connectors.
 // These functions handle PEM/PFX conversion, key parsing, thumbprint computation,
 // and random password generation. Extracted from the IIS connector (M39) to enable

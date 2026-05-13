@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package oidc is the Bundle 2 OpenID Connect integration: server-side
 // validation of ID tokens issued by an enterprise IdP (Okta / Azure AD /
 // Google Workspace / Keycloak / Authentik / Auth0), JWKS rotation,

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package handler — Auth Bundle 2 Phase 5 / OIDC + session HTTP surface.
 //
 // 13 endpoints split into three logical groups:

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package openssl implements the issuer.Connector interface for custom CA integrations.
 //
 // This connector delegates certificate signing to user-provided scripts/commands.

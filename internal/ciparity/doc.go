@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package ciparity hosts cross-surface contract-parity tests.
 //
 // Per post-v2.1.0 anti-rot item 2 (Auditable Codebase Bundle), this

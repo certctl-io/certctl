@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // EnvelopedData parser + decryptor for SCEP PKIMessage.
 //
 // RFC 5652 §6 (Cryptographic Message Syntax — EnvelopedData) +

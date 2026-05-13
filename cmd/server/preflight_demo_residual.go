@@ -1,4 +1,5 @@
-// Copyright (c) certctl-io contributors.
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
 //
 // Audit 2026-05-11 A-8 — demo-mode residual-grants detector. Closes the
 // deferred Phase 2 leg of HIGH-12 (cowork/auth-bundles-fixes-2026-05-10/

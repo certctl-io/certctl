@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package auth holds the RBAC domain types: tenants, roles, permissions,
 // role-permission grants, and actor-role assignments. Bundle 1 Phase 1
 // ships these as the schema primitive; Phase 2 wires the service layer,

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package session implements the post-login session lifecycle for
 // Auth Bundle 2 Phase 4: cookie minting + signature validation +
 // idle/absolute expiry + revocation + signing-key rotation + GC.

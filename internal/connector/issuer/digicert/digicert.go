@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package digicert implements the issuer.Connector interface for DigiCert CertCentral.
 //
 // DigiCert CertCentral is an enterprise certificate authority offering DV, OV, and EV

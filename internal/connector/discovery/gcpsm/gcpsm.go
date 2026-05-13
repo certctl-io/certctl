@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package gcpsm implements the domain.DiscoverySource interface for GCP Secret Manager.
 //
 // GCP Secret Manager is a Google Cloud service for securely storing and managing secrets,

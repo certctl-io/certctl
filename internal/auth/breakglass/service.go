@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package breakglass — Auth Bundle 2 Phase 7.5 / break-glass admin service.
 //
 // Decision 4: operator-toggleable local-password admin for the SSO-broken

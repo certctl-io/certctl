@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package domain
 
 // BulkReassignmentRequest is the input to POST /api/v1/certificates/bulk-reassign.

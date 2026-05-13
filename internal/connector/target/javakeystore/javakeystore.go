@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package javakeystore implements a target connector for deploying certificates
 // to Java KeyStores (JKS/PKCS#12) via the keytool CLI. This enables TLS cert
 // deployment for Tomcat, Jetty, Kafka, Elasticsearch, and any JVM-based service

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package crypto provides AES-256-GCM encryption for sensitive configuration data.
 //
 // The on-disk format for blobs produced by [EncryptIfKeySet] is versioned.

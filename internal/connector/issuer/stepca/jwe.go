@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package stepca — JWE decryption for step-ca provisioner keys.
 //
 // step-ca stores provisioner private keys as JWE-encrypted JSON files using:

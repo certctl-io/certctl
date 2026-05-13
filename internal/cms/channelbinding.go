@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package cms implements the small subset of CMS / RFC 7030 / RFC 9266
 // helpers that the EST handler needs at request-time: extracting the
 // RFC 9266 tls-exporter from a *tls.ConnectionState, and pulling the

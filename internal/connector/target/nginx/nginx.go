@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package nginx implements the NGINX target connector. As of the
 // deploy-hardening I master bundle Phase 4 (the canonical
 // implementation that Phases 5-9 model on), NGINX is the first

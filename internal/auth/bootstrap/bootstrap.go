@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package bootstrap ships the day-0 admin-creation primitive for Bundle 1
 // Phase 6. The control plane comes up with no admin-roled actors; the
 // operator hands the env-var token to a single curl call; the server

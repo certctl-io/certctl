@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package auth holds the certctl auth surface: API-key validation, the
 // authenticated-actor context keys, and the helpers that consumers across
 // the codebase use to read the actor identity (rate limiter, audit

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package k8ssecret implements a target.Connector for deploying certificates to Kubernetes Secrets.
 // This enables the "proxy agent" pattern — a certctl agent running in a Kubernetes cluster
 // (or outside with kubeconfig access) can deploy certificates as kubernetes.io/tls Secrets.

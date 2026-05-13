@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package azurekv implements a target.Connector for deploying certificates
 // to Azure Key Vault. Key Vault is the Azure-managed secret/certificate
 // store that App Service / Application Gateway / Front Door / Container

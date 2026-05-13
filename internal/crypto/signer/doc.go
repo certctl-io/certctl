@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package signer abstracts the act of producing cryptographic signatures
 // over digests on behalf of a certificate authority. It exists so that
 // downstream code (leaf-cert issuance, CRL generation, OCSP response

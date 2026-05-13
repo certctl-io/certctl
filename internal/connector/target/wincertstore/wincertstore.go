@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package wincertstore implements a target connector for deploying certificates
 // to the Windows Certificate Store via PowerShell. Unlike the IIS connector,
 // this connector only imports certificates into the store — it does not manage

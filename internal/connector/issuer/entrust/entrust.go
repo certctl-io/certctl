@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package entrust implements the issuer.Connector interface for Entrust Certificate Services.
 //
 // Entrust Certificate Services provides enterprise certificate authority offerings via

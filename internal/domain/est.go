@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package domain
 
 // ESTEnrollResult holds the result of an EST (RFC 7030) enrollment operation.

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package session — Auth Bundle 2 Phase 6 / session + CSRF middleware.
 //
 // This file ships the HTTP middleware that wires the post-login session

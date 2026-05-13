@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package intune handles the Microsoft Intune dynamic-challenge format
 // embedded in SCEP CSR challengePassword attributes when the SCEP server
 // is sitting behind the Microsoft Intune Certificate Connector.

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package mcp
 
 // Audit 2026-05-10 MED-13 closure — 11 new MCP tools that round out

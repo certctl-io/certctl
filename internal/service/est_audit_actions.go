@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package service
 
 // EST RFC 7030 hardening master bundle Phase 11.3 — typed audit action

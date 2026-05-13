@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package globalsign implements the issuer.Connector interface for GlobalSign Atlas HVCA.
 //
 // GlobalSign Atlas HVCA (Hosted Validation CA) is an enterprise certificate authority

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Bundle-9 / Audit L-014 (Document the CA-key-in-process threat model):
 //
 // The local CA holds its private key in this process's heap (c.caSigner

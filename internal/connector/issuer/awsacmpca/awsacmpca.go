@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package awsacmpca implements the issuer.Connector interface for AWS Certificate Manager Private CA (ACM PCA).
 //
 // AWS ACM Private CA provides a fully managed private certificate authority

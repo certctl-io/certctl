@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package intune
 
 // SCEP RFC 8894 + Intune master bundle Phase 8.5 (originally) +

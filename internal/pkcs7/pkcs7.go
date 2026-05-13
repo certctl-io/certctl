@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package pkcs7 provides ASN.1 helpers for building PKCS#7 structures.
 // Used by EST (RFC 7030) and SCEP (RFC 8894) protocol handlers.
 // No external dependencies — hand-rolled ASN.1 encoding only.

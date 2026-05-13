@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package repository defines the repository-layer error sentinels that
 // handlers map to HTTP status codes via errors.Is.
 //

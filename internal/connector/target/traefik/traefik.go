@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package traefik implements the Traefik file-provider target
 // connector. Bundle 4 of the 2026-05-02 deployment-target audit:
 // upgraded from two separate deploy.AtomicWriteFile calls (cert,

@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package ratelimit provides shared rate-limit primitives used by
 // authenticated-but-shared-credential code paths (SCEP/Intune
 // per-device challenge enrollment, EST per-principal CSR enrollment,

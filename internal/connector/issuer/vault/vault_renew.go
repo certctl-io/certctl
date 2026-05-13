@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 package vault
 
 // Top-10 fix #5 of the 2026-05-03 issuer-coverage audit. Pre-fix,

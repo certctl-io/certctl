@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package awssm implements the domain.DiscoverySource interface for AWS Secrets Manager.
 //
 // AWS Secrets Manager is a managed service for storing and managing secrets including

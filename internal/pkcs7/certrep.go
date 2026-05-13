@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // CertRep PKIMessage response builder for SCEP.
 //
 // RFC 8894 §3.3.2 (Certificate Response Message Format) +

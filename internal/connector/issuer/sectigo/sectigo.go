@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // Package sectigo implements the issuer.Connector interface for Sectigo Certificate Manager (SCM).
 //
 // Sectigo Certificate Manager is an enterprise certificate authority offering DV, OV, and EV

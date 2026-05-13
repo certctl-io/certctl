@@ -1,3 +1,6 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+
 // SignerInfo parser + signature verifier for SCEP PKIMessage.
 //
 // RFC 5652 §5 (SignedData) + RFC 8894 §3.2.1 (SCEP authenticatedAttributes).
