@@ -7,13 +7,25 @@
 #
 # Per ci-pipeline-cleanup bundle Phase 9 / frozen decision 0.11.
 #
-# Verified gap at HEAD 1de61e91 (after root-cause):
-#   142 router routes vs 136 OpenAPI operations
-#   6 router-only routes (all SCEP wire-protocol endpoints)
-#   0 OpenAPI-only operations
+# Phase 5 reconciliation (2026-05-13):
+#   220 r.Register call sites in internal/api/router/router.go
+#   209 unique (METHOD /path) router routes after de-duplication
+#   158 operationIds in api/openapi.yaml
+#    64 documented exceptions in api/openapi-handler-exceptions.yaml
+#     0 unaccounted router routes — every route is in OpenAPI OR
+#       in the exceptions YAML. Guard passes clean today.
 #
-# All 6 router-only routes are documented as legitimate exceptions in
-# api/openapi-handler-exceptions.yaml.
+# Of the 64 exceptions:
+#   35 wire-protocol carve-outs (SCEP RFC 8894 = 8, ACME RFC 8555
+#      default + per-profile = 27). These MUST stay as exceptions —
+#      they're protocol contracts, not REST resources.
+#   29 REST-shaped routes deferred from openapi.yaml authoring
+#      (auth sessions, OIDC providers admin, breakglass admin,
+#      users mgmt, runtime-config, demo-residual-cleanup, audit
+#      export). Burn-down target: author the 29 OpenAPI ops over
+#      the next ~2 sprints so the generated client (web/orval.config.ts)
+#      covers them. Tracked under ARCH-H1 in
+#      cowork/certctl-architecture-diligence-audit.html.
 #
 # Going forward: any new gap (in either direction) fails the build
 # unless documented in the exceptions YAML.

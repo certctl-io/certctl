@@ -7,6 +7,24 @@
 # (health, metrics, pprof) routes only.
 #
 # Per ci-pipeline-cleanup bundle Phase 9 / frozen decision 0.11.
+#
+# Phase 5 reconciliation (2026-05-13, architecture diligence audit
+# ARCH-H1): of the 64 entries below, 35 are legitimate wire-protocol
+# carve-outs (SCEP RFC 8894 = 8 entries, ACME RFC 8555 default + per-
+# profile = 27 entries) that MUST stay. The remaining 29 are REST-
+# shaped routes whose OpenAPI ops were deferred during their original
+# Bundle 2 / audit-2026-05-10 / 2026-05-11 work. Burn-down plan:
+#
+#   Sprint A (per-cluster, ~7-8 ops each):
+#     Cluster 1: auth/sessions + auth/oidc (12 ops)
+#     Cluster 2: auth/breakglass + auth/users + auth/runtime-config (8 ops)
+#     Cluster 3: audit/export + demo-residual/cleanup + auth/logout +
+#                auth/breakglass/login + auth/oidc/{login,callback,bcl} (9 ops)
+#
+# Each authored OpenAPI op needs request/response schemas (not
+# placeholders) so the generated client at web/orval.config.ts emits
+# typed signatures. When an op lands, delete the corresponding entry
+# below + bump the openapi-handler-parity.sh expected counts.
 
 documented_exceptions:
   - route: "GET /scep"
