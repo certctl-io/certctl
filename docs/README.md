@@ -74,8 +74,6 @@ You're running certctl in production and need operational guidance.
 | [Helm deployment](operator/helm-deployment.md) | Kubernetes installation via the bundled chart |
 | [Performance baselines](operator/performance-baselines.md) | Operator-runnable benchmarks for regression spot checks |
 | [Auth benchmarks](operator/auth-benchmarks.md) | Session + OIDC validation p99 targets and measured baselines |
-| [Scheduler HA semantics](operator/scheduler-ha.md) | Per-loop HA truth table for the 15 scheduler loops; what duplicates on multi-replica |
-| [Rate-limit scope](operator/rate-limit-scope.md) | Process-local vs cluster-wide rate-limit behavior, restart semantics, multi-replica mental math |
 | [Legacy clients (TLS 1.2)](operator/legacy-clients-tls-1.2.md) | Reverse-proxy runbook for embedded EST/SCEP clients on TLS 1.2 |
 
 ### Runbooks
