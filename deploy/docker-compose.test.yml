@@ -272,6 +272,14 @@ services:
       CERTCTL_ACME_EMAIL: test@certctl.dev
       CERTCTL_ACME_CHALLENGE_TYPE: http-01
       CERTCTL_ACME_INSECURE: "true"
+      # Phase 2 SEC-M4 (2026-05-13): CERTCTL_ACME_INSECURE=true requires
+      # the paired CERTCTL_ACME_INSECURE_ACK=true; without the ACK the
+      # server's Config.Validate() refuses to start. This integration
+      # stack uses Pebble's self-signed ACME directory, so disabling
+      # TLS verification is correct — but the ACK env var has to be
+      # set explicitly so the test posture matches what production
+      # operators are blocked from doing accidentally.
+      CERTCTL_ACME_INSECURE_ACK: "true"
 
       # step-ca issuer (iss-stepca)
       CERTCTL_STEPCA_URL: https://step-ca:9000
