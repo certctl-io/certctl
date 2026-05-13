@@ -714,7 +714,7 @@ func TestValidate_AuthTypeNone_NonLoopback_AckPasses(t *testing.T) {
 		Server:    srv,
 		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:       LogConfig{Level: "info", Format: "json"},
-		Auth:      AuthConfig{Type: "none", Secret: "", DemoModeAck: true},
+		Auth:      AuthConfig{Type: "none", Secret: "", DemoModeAck: true, DemoModeAckTS: strconv.FormatInt(time.Now().Unix(), 10)},
 		Keygen:    KeygenConfig{Mode: "agent"},
 		Scheduler: validSchedulerConfig(),
 	}
@@ -1794,6 +1794,7 @@ func TestValidate_Bundle2_PlaceholderAuthSecret_DemoAckExempt(t *testing.T) {
 	cfg.Auth.Type = "api-key"
 	cfg.Auth.Secret = "change-me-in-production"
 	cfg.Auth.DemoModeAck = true
+	cfg.Auth.DemoModeAckTS = strconv.FormatInt(time.Now().Unix(), 10)
 
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() returned %v with DemoModeAck=true; demo path must accept placeholder secret", err)
@@ -1827,6 +1828,7 @@ func TestValidate_Bundle2_PlaceholderEncryptionKey_DemoAckExempt(t *testing.T) {
 	cfg := validBaseConfigForEncryption(t)
 	cfg.Encryption.ConfigEncryptionKey = "change-me-32-char-encryption-key"
 	cfg.Auth.DemoModeAck = true
+	cfg.Auth.DemoModeAckTS = strconv.FormatInt(time.Now().Unix(), 10)
 
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() returned %v with DemoModeAck=true; demo path must accept placeholder encryption key", err)
@@ -1874,6 +1876,7 @@ func TestValidate_Bundle2_CORSWildcard_DemoAckExempt(t *testing.T) {
 	cfg := validBaseConfigForEncryption(t)
 	cfg.CORS.AllowedOrigins = []string{"*"}
 	cfg.Auth.DemoModeAck = true
+	cfg.Auth.DemoModeAckTS = strconv.FormatInt(time.Now().Unix(), 10)
 
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() returned %v with DemoModeAck=true; demo path must accept wildcard CORS", err)
