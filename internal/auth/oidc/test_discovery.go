@@ -157,22 +157,30 @@ func (s *Service) TestDiscovery(ctx context.Context, issuerURL string) (*TestDis
 // 10-second timeout matches the package-wide oidcOutboundTimeout
 // budget so token endpoint + JWKS + userinfo probes share the same
 // wall-clock horizon.
+// jwksProbeClient is the *http.Client used by jwksReachable. Package-
+// level var so the test suite can swap it for an SSRF-guard-bypassed
+// client when exercising jwksReachable against httptest.NewServer
+// (which binds to 127.0.0.1 and would otherwise be refused by
+// validation.SafeHTTPDialContext). Mirrors the
+// internal/connector/notifier/webhook + slack + teams test-seam
+// pattern. Production code never reassigns this var.
+var jwksProbeClient = &http.Client{
+	Timeout: oidcOutboundTimeout,
+	Transport: &http.Transport{
+		DialContext:           validation.SafeHTTPDialContext(oidcOutboundTimeout),
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
+
 var jwksReachable = func(ctx context.Context, jwksURI string) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
 	if err != nil {
 		return false, err
 	}
-	client := &http.Client{
-		Timeout: oidcOutboundTimeout,
-		Transport: &http.Transport{
-			DialContext:           validation.SafeHTTPDialContext(oidcOutboundTimeout),
-			MaxIdleConns:          10,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
-	resp, err := client.Do(req)
+	resp, err := jwksProbeClient.Do(req)
 	if err != nil {
 		return false, err
 	}
