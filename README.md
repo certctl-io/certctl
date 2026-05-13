@@ -128,12 +128,15 @@ Detects your OS and architecture, downloads the binary, configures systemd (Linu
 ### Helm chart (Kubernetes)
 
 ```bash
+# Required: TLS (pick one), server API key, and Postgres password.
+# The chart fail-fasts at template time if any required value is missing.
 helm install certctl deploy/helm/certctl/ \
-  --set server.auth.apiKey=your-api-key \
-  --set postgresql.password=your-db-password
+  --set server.tls.existingSecret=<your-kubernetes.io/tls-secret-name> \
+  --set server.auth.apiKey=$(openssl rand -base64 32) \
+  --set postgresql.auth.password=$(openssl rand -base64 32)
 ```
 
-Production-ready chart with Server Deployment, PostgreSQL StatefulSet, Agent DaemonSet, health probes, security contexts (non-root, read-only rootfs), and optional Ingress. See [values.yaml](deploy/helm/certctl/values.yaml).
+Production-ready chart with Server Deployment, PostgreSQL StatefulSet (or external Postgres), Agent DaemonSet, health probes, container-scope security hardening (read-only rootfs, drop-all capabilities, non-root UID), optional PodDisruptionBudget, NetworkPolicy, Prometheus ServiceMonitor, and Ingress. See [values.yaml](deploy/helm/certctl/values.yaml) and the [external-Postgres example](deploy/helm/examples/values-external-db.yaml).
 
 ### Container images
 

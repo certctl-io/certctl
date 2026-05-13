@@ -19,7 +19,7 @@ spec:
     spec:
       serviceAccountName: {{ include "certctl.serviceAccountName" . }}
       securityContext:
-        {{- toYaml .Values.agent.securityContext | nindent 8 }}
+        {{- include "certctl.podSecurityContext" .Values.agent.securityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -40,6 +40,8 @@ spec:
         - name: agent
           image: {{ include "certctl.agentImage" . }}
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          securityContext:
+            {{- include "certctl.containerSecurityContext" .Values.agent.securityContext | nindent 12 }}
           env:
             - name: CERTCTL_SERVER_URL
               value: {{ include "certctl.serverURL" . }}
@@ -106,7 +108,7 @@ spec:
     spec:
       serviceAccountName: {{ include "certctl.serviceAccountName" . }}
       securityContext:
-        {{- toYaml .Values.agent.securityContext | nindent 8 }}
+        {{- include "certctl.podSecurityContext" .Values.agent.securityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -127,6 +129,8 @@ spec:
         - name: agent
           image: {{ include "certctl.agentImage" . }}
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          securityContext:
+            {{- include "certctl.containerSecurityContext" .Values.agent.securityContext | nindent 12 }}
           env:
             - name: CERTCTL_SERVER_URL
               value: {{ include "certctl.serverURL" . }}

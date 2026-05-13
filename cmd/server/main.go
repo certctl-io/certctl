@@ -128,8 +128,14 @@ func main() {
 		logger.Info("agent bootstrap token configured (length redacted; constant-time compare on POST /api/v1/agents)")
 	}
 
-	// Initialize database connection pool
-	db, err := postgres.NewDB(cfg.Database.URL)
+	// Initialize database connection pool.
+	//
+	// Bundle 3 closure (D12): pre-Bundle-3 the operator-facing
+	// CERTCTL_DATABASE_MAX_CONNS was a lying-field — config loaded the
+	// value and Validate() checked the floor, but the pool was hard-
+	// coded to SetMaxOpenConns(25). Post-Bundle-3 NewDBWithMaxConns
+	// threads the operator setting through to the connection pool.
+	db, err := postgres.NewDBWithMaxConns(cfg.Database.URL, cfg.Database.MaxConnections)
 	if err != nil {
 		logger.Error("failed to connect to database", "error", err)
 		os.Exit(1)

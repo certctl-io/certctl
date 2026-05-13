@@ -2,7 +2,15 @@ apiVersion: v2
 name: certctl
 description: Self-hosted certificate lifecycle management platform
 type: application
-version: 0.1.0
+# Bundle 3 closure (OPS-L1): bumped from 0.1.0 → 1.0.0. The pre-1.0
+# version implied "unstable chart, breaking changes on every minor"
+# which prospective enterprise operators read as "not ready for
+# production". The chart has been deployed against real clusters since
+# 2026-02 and shipped through 8 audit closures (M-018, U-1, U-2, U-3,
+# H-1, G-1, B1 connector validation, B2 first-run guards); 1.0.0
+# matches that maturity. The chart still adheres to semver going
+# forward — any breaking value-schema change bumps to 2.0.0.
+version: 1.0.0
 appVersion: "2.1.0"
 keywords:
   - certificate

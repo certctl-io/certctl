@@ -23,17 +23,54 @@ import (
 const pgErrInvalidPassword = "28P01"
 
 // NewDB opens a PostgreSQL database connection and sets up connection pooling.
+//
+// The pool size is hard-coded here for backward compatibility with call
+// sites that don't pass an explicit limit. The Bundle 3 closure (D12)
+// added NewDBWithMaxConns so the operator-facing CERTCTL_DATABASE_MAX_CONNS
+// env var actually flows through to db.SetMaxOpenConns; cmd/server/main.go
+// uses NewDBWithMaxConns now. Idle conns are kept at MaxOpenConns/5
+// (rounded up to at least 1) so the ratio behavior pre-Bundle-3 (5 idle
+// out of 25 max) generalizes to any operator-supplied limit.
 func NewDB(connStr string) (*sql.DB, error) {
+	return NewDBWithMaxConns(connStr, 25)
+}
+
+// NewDBWithMaxConns opens a PostgreSQL database connection and sets the
+// connection-pool max-open + max-idle limits.
+//
+// Bundle 3 closure (D12): pre-Bundle-3 the pool was hard-coded to
+// SetMaxOpenConns(25) regardless of the operator's
+// CERTCTL_DATABASE_MAX_CONNS setting. The config field was loaded by
+// internal/config/config.go (validated to be >= 1), wired into values.yaml's
+// `CERTCTL_DATABASE_MAX_CONNS: "25"` example comment, AND surfaced in
+// docs/reference/configuration.md as if it took effect — but the
+// underlying pool ignored it. Operators tuning for higher load found
+// no behavioral change.
+//
+// Post-Bundle-3 the operator-facing knob actually flows here. The
+// idle-pool size scales with maxOpen so the historical 1:5 ratio
+// (5 idle of 25 max) carries forward to any operator-supplied size.
+// Floors: maxOpen guaranteed >= 1 by config.Validate; maxIdle floored
+// to 1 to avoid the 0-idle pathological case where every query opens
+// a fresh connection.
+func NewDBWithMaxConns(connStr string, maxOpen int) (*sql.DB, error) {
+	if maxOpen < 1 {
+		maxOpen = 1
+	}
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
+	// Configure connection pool.
+	db.SetMaxOpenConns(maxOpen)
+	maxIdle := maxOpen / 5
+	if maxIdle < 1 {
+		maxIdle = 1
+	}
+	db.SetMaxIdleConns(maxIdle)
 
-	// Ping to verify connection
+	// Ping to verify connection.
 	if err := db.Ping(); err != nil {
 		return nil, wrapPingError(err)
 	}

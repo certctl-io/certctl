@@ -128,8 +128,27 @@ Bundle B / Audit M-018 (PCI-DSS Req 4 / CWE-319):
     postgresql.tls.mode without further translation.
 */}}
 {{- define "certctl.databaseURL" -}}
+{{- if .Values.postgresql.enabled -}}
 {{- $sslMode := default "disable" .Values.postgresql.tls.mode -}}
 postgres://{{ .Values.postgresql.auth.username }}:$(POSTGRES_PASSWORD)@{{ include "certctl.fullname" . }}-postgres:5432/{{ .Values.postgresql.auth.database }}?sslmode={{ $sslMode }}
+{{- else -}}
+{{- /*
+  Bundle 3 closure (D2 + OPS-L2): external-Postgres first-class path.
+  When postgresql.enabled=false, the chart NEVER renders the
+  bundled StatefulSet, postgres-secret, or postgres-service —
+  templates/postgres-*.yaml gate themselves on .Values.postgresql.enabled.
+  The connection string comes from externalDatabase.url (the canonical
+  form) or, for backward-compat with pre-Bundle-3 deploys, from
+  server.env.CERTCTL_DATABASE_URL (which overrides this helper at the
+  pod-spec level — see server-deployment.yaml).
+
+  externalDatabase.url is consumed VERBATIM by the server's
+  CERTCTL_DATABASE_URL env var. Operators are responsible for choosing
+  the right sslmode (`verify-full` recommended for managed Postgres
+  per PCI-DSS Req 4 §2.2.5; see docs/database-tls.md).
+*/ -}}
+{{- required "externalDatabase.url is required when postgresql.enabled=false" .Values.externalDatabase.url -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -180,8 +199,107 @@ per affected resource. No-op when configured correctly.
 {{- if and (not .Values.server.tls.existingSecret) (not .Values.server.tls.certManager.enabled) -}}
 {{- fail "\n\ncertctl refuses to start without TLS.\n\nSet EXACTLY ONE of:\n  --set server.tls.existingSecret=<your-kubernetes.io/tls-secret-name>\nOR\n  --set server.tls.certManager.enabled=true \\\n  --set server.tls.certManager.issuerRef.name=<your-issuer-or-clusterissuer>\n\nSee docs/tls.md for the full setup walkthrough, including bootstrap\nguidance for air-gapped clusters without cert-manager.\n" -}}
 {{- end -}}
+{{- if and .Values.server.tls.existingSecret .Values.server.tls.certManager.enabled -}}
+{{- /*
+  Bundle 3 closure (D7): pre-Bundle-3 the helper only rejected the
+  NEITHER-set case. Setting BOTH (`existingSecret` AND `certManager.enabled=true`)
+  produced two TLS sources of truth — the existing Secret got mounted but
+  cert-manager simultaneously provisioned a Certificate CR pointing at a
+  conflicting Secret. Operators ended up with a dangling cert-manager
+  Certificate or a wrong-source TLS bundle. The chart now refuses at
+  render-time so the misconfiguration cannot ship.
+*/ -}}
+{{- fail "\n\nserver.tls.existingSecret AND server.tls.certManager.enabled are BOTH set.\n\nThe chart requires EXACTLY ONE TLS ownership path (Bundle 3 closure / audit D7):\n  - existingSecret: operator owns the TLS Secret; cert-manager must NOT provision one.\n  - certManager.enabled: cert-manager owns the TLS Secret; existingSecret must be empty.\n\nUnset one of:\n  --set server.tls.existingSecret=\"\"          (let cert-manager own it)\nOR\n  --set server.tls.certManager.enabled=false   (let the existing Secret stand)\n\nSee docs/tls.md.\n" -}}
+{{- end -}}
 {{- if and .Values.server.tls.certManager.enabled (not .Values.server.tls.certManager.issuerRef.name) -}}
 {{- fail "\n\nserver.tls.certManager.enabled=true but server.tls.certManager.issuerRef.name is empty.\n\nSet:\n  --set server.tls.certManager.issuerRef.name=<your-issuer-or-clusterissuer>\n\nSee docs/tls.md.\n" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Pod- vs container-scope security context split (Bundle 3 closure / audit D3).
+
+The Kubernetes API splits SecurityContext into two non-overlapping
+field sets, and silently DROPS fields that land at the wrong scope —
+which is exactly the audit D3 finding pre-Bundle-3.
+
+Pod-scope fields (applied via spec.securityContext):
+  runAsNonRoot, runAsUser, runAsGroup, fsGroup, fsGroupChangePolicy,
+  supplementalGroups, seLinuxOptions, seccompProfile, sysctls.
+
+Container-scope fields (applied via spec.containers[].securityContext):
+  readOnlyRootFilesystem, allowPrivilegeEscalation, capabilities,
+  privileged, procMount, runAsNonRoot/runAsUser/runAsGroup (override),
+  seLinuxOptions/seccompProfile (override).
+
+These helpers split a single operator-facing `securityContext` map
+into the two sub-maps so the chart renders each field at the scope
+where Kubernetes actually honors it. The split is conservative — a
+field that COULD live at either scope is rendered at pod scope only
+(no override at container scope) so behavior matches the pre-Bundle-3
+operator intent: pod-level setting is the source of truth.
+
+Operators don't need to change values.yaml; the existing
+`server.securityContext` and `agent.securityContext` blocks keep
+working byte-for-byte. The Helm template just routes each field to
+the correct YAML node now.
+*/}}
+{{- define "certctl.podSecurityContext" -}}
+{{- $sc := . -}}
+{{- $podKeys := list "runAsNonRoot" "runAsUser" "runAsGroup" "fsGroup" "fsGroupChangePolicy" "supplementalGroups" "seLinuxOptions" "seccompProfile" "sysctls" -}}
+{{- $out := dict -}}
+{{- range $k := $podKeys -}}
+{{- if hasKey $sc $k -}}
+{{- $_ := set $out $k (index $sc $k) -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end }}
+
+{{- define "certctl.containerSecurityContext" -}}
+{{- $sc := . -}}
+{{- $containerKeys := list "readOnlyRootFilesystem" "allowPrivilegeEscalation" "capabilities" "privileged" "procMount" -}}
+{{- $out := dict -}}
+{{- range $k := $containerKeys -}}
+{{- if hasKey $sc $k -}}
+{{- $_ := set $out $k (index $sc $k) -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end }}
+
+{{/*
+Required-secret gate (Bundle 3 closure / audit D1).
+
+Pre-Bundle-3 the chart accepted empty `server.auth.apiKey` and empty
+`postgresql.auth.password` and rendered Secrets with empty values; the
+certctl-server container then crash-looped at startup with the auth
+configuration error or with `pq: password authentication failed for
+user "certctl"`. Worse, an operator who forgot to set the api-key
+ended up with auth.type=api-key + empty CERTCTL_AUTH_SECRET in the
+Secret, which Validate() rejects at startup — but the diagnostic
+surfaces inside a CrashLoopBackOff, not at `helm install` time where
+it would be caught immediately.
+
+Post-Bundle-3 the chart fails at template time with operator-actionable
+guidance. The bundled-Postgres path (`postgresql.enabled=true`)
+requires `postgresql.auth.password`; the external-Postgres path
+(`postgresql.enabled=false`) skips that check because credentials are
+embedded in `externalDatabase.url` instead.
+
+Any template that depends on either secret value should call
+`{{ include "certctl.requiredSecrets" . }}` at the top so this guard
+runs once per affected resource. No-op when configured correctly.
+*/}}
+{{- define "certctl.requiredSecrets" -}}
+{{- if and (eq .Values.server.auth.type "api-key") (not .Values.server.auth.apiKey) -}}
+{{- fail "\n\nserver.auth.type=\"api-key\" but server.auth.apiKey is empty.\n\nSet:\n  --set server.auth.apiKey=$(openssl rand -base64 32)\n\nor put the value in a values override. The certctl-server container\nrefuses to start without an API key when auth.type=api-key.\n\nFor demo deploys without authentication, use:\n  --set server.auth.type=none\n(only safe behind an authenticating gateway — see docs/operator/security.md).\n" -}}
+{{- end -}}
+{{- if and .Values.postgresql.enabled (not .Values.postgresql.auth.password) -}}
+{{- fail "\n\npostgresql.enabled=true but postgresql.auth.password is empty.\n\nSet:\n  --set postgresql.auth.password=$(openssl rand -base64 32)\n\nor put the value in a values override. The bundled Postgres\nStatefulSet refuses to bootstrap initdb without POSTGRES_PASSWORD.\n\nFor external Postgres deployments, set:\n  --set postgresql.enabled=false\n  --set externalDatabase.url=postgres://user:pass@host:5432/db?sslmode=require\nSee deploy/helm/examples/values-external-db.yaml.\n" -}}
+{{- end -}}
+{{- if and (not .Values.postgresql.enabled) (not .Values.externalDatabase.url) (not .Values.server.env.CERTCTL_DATABASE_URL) -}}
+{{- fail "\n\npostgresql.enabled=false but no external database URL is configured.\n\nSet ONE of:\n  --set externalDatabase.url=postgres://user:pass@host:5432/db?sslmode=require\nOR (legacy)\n  --set server.env.CERTCTL_DATABASE_URL=postgres://user:pass@host:5432/db?sslmode=require\n\nSee deploy/helm/examples/values-external-db.yaml.\n" -}}
 {{- end -}}
 {{- end }}
 

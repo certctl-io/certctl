@@ -273,6 +273,34 @@ server:
   #     secretName: ca-cert
 
 # ==============================================================================
+# External Database Configuration (Bundle 3 closure / D2 + OPS-L2)
+# ==============================================================================
+# When postgresql.enabled=false, the chart skips the bundled StatefulSet +
+# Secret + Service and instead consumes the URL below verbatim as the
+# server's CERTCTL_DATABASE_URL. The URL embeds username, password,
+# host, port, database, and sslmode — operators are responsible for
+# rotating credentials in this string out-of-band (Kubernetes Secret +
+# helm upgrade is the supported pattern).
+#
+# Recommended sslmode for managed Postgres (RDS, Cloud SQL, Azure DB):
+#   verify-full  — PCI-DSS Req 4 v4.0 §2.2.5 compliant; requires CA bundle.
+#                  Mount the CA via server.volumes / server.volumeMounts and
+#                  set sslrootcert=/path/in/pod/ca.crt in the URL.
+#
+# Example values overrides:
+#   postgresql.enabled: false
+#   externalDatabase.url: "postgres://certctl:HUNTER2@db.example.com:5432/certctl?sslmode=verify-full"
+#
+# Migration from the legacy `server.env.CERTCTL_DATABASE_URL` workaround:
+# both still work (env block overrides the helper-emitted Secret value at
+# pod-spec level), but the new path renders cleaner manifests with no
+# stranded postgres-* templates.
+externalDatabase:
+  # Connection string used when postgresql.enabled=false.
+  # Required in that mode — see certctl.requiredSecrets helper.
+  url: ""
+
+# ==============================================================================
 # PostgreSQL Configuration
 # ==============================================================================
 postgresql:
@@ -510,10 +538,26 @@ rbac:
   create: true
 
 # ==============================================================================
-# Kubernetes Secrets Target Connector
+# Kubernetes Secrets Target Connector (PREVIEW — Bundle 3 closure / C3)
 # ==============================================================================
+# Bundle 3 audit closure (C3): the connector framework at
+# internal/connector/target/k8ssecret/ ships the Config + interface +
+# 14 unit tests, but the production K8s client at
+# k8ssecret.go::realK8sClient is documented as "a stub placeholder for
+# the real k8s.io/client-go implementation". The repo does not import
+# k8s.io/client-go (verified via `grep -n "client-go" go.mod`), so the
+# connector cannot deploy to a real cluster today.
+#
+# Setting kubernetesSecrets.enabled=true wires up the RBAC verbs the
+# real client will need (get/create/update/patch/delete on Secrets)
+# without making the connector functional — operators trying to use it
+# get the stub's error and a pointer to this note.
+#
+# Status: PREVIEW. Production client lands when the cluster-management
+# bundle ships (tracked in WORKSPACE-ROADMAP.md). Until then,
+# in-cluster deploys use the file-based connectors (NGINX, Apache,
+# HAProxy, etc.) via a Pod-mounted Secret + DaemonSet agent.
 kubernetesSecrets:
-  # Enable RBAC rules for managing TLS Secrets
   enabled: false
 
 # ==============================================================================
@@ -527,6 +571,13 @@ podDisruptionBudget:
 # ==============================================================================
 # Monitoring Configuration
 # ==============================================================================
+# Bundle 3 closure (D5): the ServiceMonitor template at
+# templates/servicemonitor.yaml renders when both monitoring.enabled=true
+# AND monitoring.serviceMonitor.enabled=true. The endpoint scrapes
+# /api/v1/metrics/prometheus, which is rbac-gated on `metrics.read` —
+# operators MUST provide a bearer token via
+# monitoring.serviceMonitor.bearerTokenSecret pointing at a Secret with
+# an API key holding that permission. Without the token, scrapes 401.
 monitoring:
   enabled: false
   # Prometheus ServiceMonitor
@@ -534,8 +585,53 @@ monitoring:
     enabled: false
     interval: 30s
     scrapeTimeout: 10s
+    # Additional labels applied to the ServiceMonitor metadata.
     # labels: {}
-    # selector: {}
+    # Bearer-token Secret reference (required when the certctl server's
+    # /api/v1/metrics/prometheus endpoint is gated by api-key auth).
+    # Example:
+    #   bearerTokenSecret:
+    #     name: certctl-prometheus-key
+    #     key: api-key
+    # bearerTokenSecret: {}
+    # TLS config for the scrape endpoint. The certctl server presents
+    # the same TLS cert the rest of the chart uses; insecureSkipVerify
+    # defaults to true so demos work out of the box. Production deploys
+    # should pin the CA via caFile or ca.secret.
+    # tlsConfig:
+    #   caFile: /etc/prometheus/secrets/certctl-ca/ca.crt
+    #   serverName: certctl-server
+    # tlsConfig: {}
+    # Optional relabeling for the scrape job.
+    # relabelings: []
+
+# ==============================================================================
+# Network Policy (Bundle 3 closure / D11)
+# ==============================================================================
+# Default off so existing deploys don't suddenly lose network reach.
+# When enabled, restricts the server pod to:
+#   - Ingress: from in-namespace agent pods only.
+#   - Egress: kube-dns + bundled Postgres (if enabled).
+# Operators add CA / OIDC / SMTP egress via extraEgress.
+networkPolicy:
+  enabled: false
+  # Additional Ingress rules merged into the policy. Each entry is a
+  # raw networking.k8s.io/v1 NetworkPolicyIngressRule.
+  extraIngress: []
+  # Additional Egress rules merged into the policy. Common operator
+  # need: 443/TCP to an OIDC issuer, 443/TCP to a public CA endpoint,
+  # 25/TCP to an SMTP relay.
+  # Example:
+  # extraEgress:
+  #   - to:
+  #       - ipBlock:
+  #           cidr: 0.0.0.0/0
+  #           except:
+  #             - 10.0.0.0/8
+  #     ports:
+  #       - protocol: TCP
+  #         port: 443
+  extraEgress: []
 
 # ==============================================================================
 # Advanced Configuration

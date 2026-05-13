@@ -1,0 +1,63 @@
+{{- /*
+Bundle 3 closure (D5 + OPS-M1 docs): Prometheus Operator ServiceMonitor.
+
+Pre-Bundle-3 the chart had `monitoring.serviceMonitor.enabled` in
+values.yaml but no template consumed it — toggling it on rendered
+nothing. Audit D5 closed.
+
+The endpoint scrapes /api/v1/metrics/prometheus which the certctl
+server already exposes in Prometheus exposition format (see
+internal/api/handler/metrics.go::GetPrometheusMetrics). Note: the
+endpoint is rbac-gated on `metrics.read`, so the ServiceMonitor needs
+a bearer token. Operators with Prometheus Operator MUST set
+`monitoring.serviceMonitor.bearerTokenSecret` pointing at a Secret
+that holds an API key with the `metrics.read` permission. Without
+that, scrapes return 401.
+
+OPS-M1 caveat: the current /metrics/prometheus handler is a hand-rolled
+exposition-format emitter, not prometheus/client_golang-instrumented
+code. Histograms, exemplars, and target labels are limited to what the
+handler computes statically. Migration to client_golang tracked in
+WORKSPACE-ROADMAP.md.
+*/ -}}
+{{- if and .Values.monitoring.enabled .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "certctl.fullname" . }}-server
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "certctl.serverSelectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: https
+      scheme: https
+      path: /api/v1/metrics/prometheus
+      interval: {{ .Values.monitoring.serviceMonitor.interval | default "30s" }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout | default "10s" }}
+      tlsConfig:
+        # The certctl server uses self-signed bootstrap TLS or operator-
+        # provided cert-manager TLS — the ServiceMonitor consumes the
+        # same CA bundle the server presents. When server.tls.existingSecret
+        # is set, operators usually want to pull the matching ca.crt key
+        # out of that Secret. Adjust if your CA chain lives elsewhere.
+        {{- if .Values.monitoring.serviceMonitor.tlsConfig }}
+        {{- toYaml .Values.monitoring.serviceMonitor.tlsConfig | nindent 8 }}
+        {{- else }}
+        insecureSkipVerify: true
+        {{- end }}
+      {{- with .Values.monitoring.serviceMonitor.bearerTokenSecret }}
+      bearerTokenSecret:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.monitoring.serviceMonitor.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

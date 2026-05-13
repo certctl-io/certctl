@@ -1,5 +1,6 @@
 {{- include "certctl.tls.required" . }}
 {{- include "certctl.validateAuthType" . }}
+{{- include "certctl.requiredSecrets" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,8 +24,13 @@ spec:
         checksum/secret: {{ include (print $.Template.BasePath "/server-secret.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "certctl.serviceAccountName" . }}
+      # Bundle 3 closure (D3): pod-level fields only. The container-only
+      # fields (readOnlyRootFilesystem, allowPrivilegeEscalation,
+      # capabilities, privileged) render at container scope below —
+      # pre-Bundle-3 they all sat here at pod scope and the K8s API
+      # silently dropped them.
       securityContext:
-        {{- toYaml .Values.server.securityContext | nindent 8 }}
+        {{- include "certctl.podSecurityContext" .Values.server.securityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -33,6 +39,13 @@ spec:
         - name: server
           image: {{ include "certctl.serverImage" . }}
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          # Bundle 3 closure (D3): container-scope security hardening.
+          # readOnlyRootFilesystem + allowPrivilegeEscalation +
+          # capabilities are container-only fields per the K8s API; the
+          # helper splits them out of the operator-facing
+          # server.securityContext map so existing values keep working.
+          securityContext:
+            {{- include "certctl.containerSecurityContext" .Values.server.securityContext | nindent 12 }}
           ports:
             - name: https
               containerPort: {{ .Values.server.port }}
@@ -51,11 +64,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "certctl.fullname" . }}-server
                   key: database-url
+            # Bundle 3 closure (D2): POSTGRES_PASSWORD is only needed
+            # for the bundled-Postgres mode. External Postgres mode
+            # embeds the password directly in externalDatabase.url.
+            {{- if .Values.postgresql.enabled }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "certctl.fullname" . }}-postgres
                   key: password
+            {{- end }}
             - name: CERTCTL_LOG_LEVEL
               valueFrom:
                 configMapKeyRef:

@@ -1,0 +1,31 @@
+{{- /*
+Bundle 3 closure (D11): PodDisruptionBudget for the server Deployment.
+
+Pre-Bundle-3 values.yaml carried `podDisruptionBudget.enabled` +
+`minAvailable` + `maxUnavailable` knobs but no template consumed
+them. Audit D11 closed.
+
+The PDB only renders when server.replicas > 1 — a single-replica
+deployment can't satisfy minAvailable=1 during voluntary disruption
+anyway (the K8s scheduler would refuse to drain the node). Operators
+running 2+ replicas get the PDB; operators running a single replica
+get a templated-out NOTES line reminding them to bump replicas first.
+*/ -}}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.server.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "certctl.fullname" . }}-server
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  selector:
+    matchLabels:
+      {{- include "certctl.serverSelectorLabels" . | nindent 6 }}
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+{{- end }}

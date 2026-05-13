@@ -1,0 +1,75 @@
+{{- /*
+Bundle 3 closure (D11): NetworkPolicy for the server Deployment.
+
+Pre-Bundle-3 the chart had no NetworkPolicy template at all — the
+audit-D11 "documented placeholder" finding referred to docs claiming
+deny-by-default network isolation that the rendered chart did not
+provide. Closed.
+
+This template emits a single NetworkPolicy that, when enabled,
+restricts the certctl-server Pod to:
+  - Ingress  : from any agent Pod in the same namespace (selector
+               match on app.kubernetes.io/component=agent) on the
+               server port, plus optional operator-supplied
+               additional from clauses (.networkPolicy.extraIngress).
+  - Egress   : to the postgres Pod (when postgresql.enabled=true),
+               53/UDP+TCP for kube-dns, and operator-supplied
+               additional to clauses for outbound CA / OIDC / SMTP
+               (.networkPolicy.extraEgress).
+
+Default off so existing deploys don't suddenly lose network reach.
+Operators opt in once they've mapped their actual egress surface.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "certctl.fullname" . }}-server
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "certctl.serverSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow in-cluster agent Pods to reach the server's HTTPS port.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "certctl.name" . }}
+              app.kubernetes.io/component: agent
+      ports:
+        - protocol: TCP
+          port: {{ .Values.server.port }}
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    # Kube-DNS (53/UDP + 53/TCP). Required for any in-cluster name
+    # resolution (postgres-service, OIDC issuer hostnames, ACME).
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.postgresql.enabled }}
+    # Bundled-Postgres egress.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "certctl.name" . }}
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
