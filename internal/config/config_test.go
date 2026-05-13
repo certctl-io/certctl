@@ -7,10 +7,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"log/slog"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -395,6 +397,233 @@ func TestLoad_CommaSeparatedList(t *testing.T) {
 	// trimSpace should handle spaces around items
 	if cfg.CORS.AllowedOrigins[1] != "https://b.com" {
 		t.Errorf("CORS.AllowedOrigins[1] = %q, want %q (trimmed)", cfg.CORS.AllowedOrigins[1], "https://b.com")
+	}
+}
+
+// Phase 2 SEC-H1 (2026-05-13) — AgentBootstrapTokenDenyEmpty staged flag.
+// When false (default), an empty token is permitted (v2.1.x warn-mode
+// pass-through preserved). When true, an empty token fails closed.
+func TestValidate_AgentBootstrapTokenDenyEmpty_DefaultFalse_AllowsEmpty(t *testing.T) {
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", AgentBootstrapToken: "", AgentBootstrapTokenDenyEmpty: false},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error with deny-empty=false + empty token: %v", err)
+	}
+}
+
+func TestValidate_AgentBootstrapTokenDenyEmpty_True_EmptyTokenFailsClosed(t *testing.T) {
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", AgentBootstrapToken: "", AgentBootstrapTokenDenyEmpty: true},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; want ErrAgentBootstrapTokenRequired")
+	}
+	if !errors.Is(err, ErrAgentBootstrapTokenRequired) {
+		t.Errorf("Validate() err = %v; want errors.Is to match ErrAgentBootstrapTokenRequired", err)
+	}
+	if !strings.Contains(err.Error(), "CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=true") {
+		t.Errorf("Validate() error = %q; want message to mention the deny-empty env var name", err.Error())
+	}
+}
+
+func TestValidate_AgentBootstrapTokenDenyEmpty_True_RealTokenPasses(t *testing.T) {
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", AgentBootstrapToken: "a-real-32-byte-token-value-here-x", AgentBootstrapTokenDenyEmpty: true},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error with deny-empty=true + real token: %v", err)
+	}
+}
+
+// Phase 2 SEC-M4 (2026-05-13) — ACME insecure now requires explicit ACK.
+func TestValidate_ACMEInsecure_WithoutAck_FailsClosed(t *testing.T) {
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret"},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+		ACME:      ACMEConfig{Insecure: true, InsecureAck: false},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; want ErrACMEInsecureWithoutAck")
+	}
+	if !errors.Is(err, ErrACMEInsecureWithoutAck) {
+		t.Errorf("Validate() err = %v; want errors.Is to match ErrACMEInsecureWithoutAck", err)
+	}
+	if !strings.Contains(err.Error(), "CERTCTL_ACME_INSECURE_ACK") {
+		t.Errorf("Validate() error = %q; want message to mention CERTCTL_ACME_INSECURE_ACK", err.Error())
+	}
+}
+
+func TestValidate_ACMEInsecure_WithAck_Passes(t *testing.T) {
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret"},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+		ACME:      ACMEConfig{Insecure: true, InsecureAck: true},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error with Insecure=true + InsecureAck=true: %v", err)
+	}
+}
+
+func TestValidate_ACMEInsecureFalse_IgnoresAck(t *testing.T) {
+	// InsecureAck is irrelevant when Insecure=false. No fail-closed branch.
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret"},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+		ACME:      ACMEConfig{Insecure: false, InsecureAck: false},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error with Insecure=false: %v", err)
+	}
+}
+
+// Phase 2 SEC-H3 (2026-05-13) — DemoModeAck now expires after 24h via DemoModeAckTS.
+// Note: DemoModeAck=true on a loopback bind requires only the timestamp guard;
+// no HIGH-12 cross-firing because the existing HIGH-12 guard fires only on
+// non-loopback hosts. All tests here keep the server host as loopback so we
+// observe ONLY the new SEC-H3 behavior.
+func TestValidate_DemoModeAck_MissingTS_FailsClosed(t *testing.T) {
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", DemoModeAck: true, DemoModeAckTS: ""},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; want ErrDemoModeAckExpired with empty TS")
+	}
+	if !errors.Is(err, ErrDemoModeAckExpired) {
+		t.Errorf("Validate() err = %v; want errors.Is to match ErrDemoModeAckExpired", err)
+	}
+	if !strings.Contains(err.Error(), "CERTCTL_DEMO_MODE_ACK_TS") {
+		t.Errorf("Validate() error = %q; want message to mention CERTCTL_DEMO_MODE_ACK_TS", err.Error())
+	}
+}
+
+func TestValidate_DemoModeAck_StaleTS_FailsClosed(t *testing.T) {
+	// TS older than 24h → expired.
+	staleEpoch := time.Now().Add(-25 * time.Hour).Unix()
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", DemoModeAck: true, DemoModeAckTS: strconv.FormatInt(staleEpoch, 10)},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; want ErrDemoModeAckExpired with 25h-old TS")
+	}
+	if !errors.Is(err, ErrDemoModeAckExpired) {
+		t.Errorf("Validate() err = %v; want errors.Is to match ErrDemoModeAckExpired", err)
+	}
+}
+
+func TestValidate_DemoModeAck_FreshTS_Passes(t *testing.T) {
+	// TS within 24h → passes.
+	freshEpoch := time.Now().Add(-1 * time.Hour).Unix()
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", DemoModeAck: true, DemoModeAckTS: strconv.FormatInt(freshEpoch, 10)},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error with 1h-old TS: %v", err)
+	}
+}
+
+func TestValidate_DemoModeAck_NonNumericTS_FailsClosed(t *testing.T) {
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", DemoModeAck: true, DemoModeAckTS: "yesterday"},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; want ErrDemoModeAckExpired with non-numeric TS")
+	}
+	if !errors.Is(err, ErrDemoModeAckExpired) {
+		t.Errorf("Validate() err = %v; want errors.Is to match ErrDemoModeAckExpired", err)
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Errorf("Validate() error = %q; want message to mention parse failure", err.Error())
+	}
+}
+
+func TestValidate_DemoModeAck_FutureDatedTS_FailsClosed(t *testing.T) {
+	// > 1m future-dated → clock-skew rejection.
+	futureEpoch := time.Now().Add(10 * time.Minute).Unix()
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", DemoModeAck: true, DemoModeAckTS: strconv.FormatInt(futureEpoch, 10)},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; want ErrDemoModeAckExpired with future-dated TS")
+	}
+	if !errors.Is(err, ErrDemoModeAckExpired) {
+		t.Errorf("Validate() err = %v; want errors.Is to match ErrDemoModeAckExpired", err)
+	}
+	if !strings.Contains(err.Error(), "future") {
+		t.Errorf("Validate() error = %q; want message to mention future-dated TS", err.Error())
+	}
+}
+
+func TestValidate_DemoModeAckFalse_IgnoresTS(t *testing.T) {
+	// DemoModeAck=false → TS is irrelevant; no fail-closed branch.
+	cfg := &Config{
+		Server:    validServerConfig(t),
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "test-secret", DemoModeAck: false, DemoModeAckTS: ""},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error with DemoModeAck=false: %v", err)
 	}
 }
 

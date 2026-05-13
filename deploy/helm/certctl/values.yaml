@@ -15,7 +15,10 @@ fullnameOverride: ""
 # Certctl Server Configuration
 # ==============================================================================
 server:
-  # Number of replicas (for HA deployments)
+  # Number of replicas (for HA deployments).
+  # Phase 2 DEPL-H1: production HA is operator-opt-in across this field
+  # + podDisruptionBudget.enabled + server.service.sessionAffinity.
+  # See docs/operator/runbooks/ha.md for the smallest-possible HA overlay.
   replicas: 1
 
   # Image configuration
@@ -561,7 +564,11 @@ kubernetesSecrets:
   enabled: false
 
 # ==============================================================================
-# Pod Disruption Budget (for HA deployments)
+# Pod Disruption Budget (for HA deployments).
+# Phase 2 DEPL-H1: defaults to enabled=false because a PDB template
+# rendered at `replicas: 1` blocks every rolling restart on a
+# single-node cluster. Production HA flips this to true alongside
+# server.replicas ≥ 2. See docs/operator/runbooks/ha.md.
 # ==============================================================================
 podDisruptionBudget:
   enabled: false

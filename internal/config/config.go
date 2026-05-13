@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -10,6 +11,54 @@ import (
 	"strings"
 	"time"
 )
+
+// Phase 2 (Default Hardening + Operator Docs) introduced three new
+// error sentinels surfaced by Validate(). Tests pin them by
+// errors.Is(err, ErrX) AND by message-text match for double safety;
+// downstream callers may inspect the wrapped chain to react to a
+// specific failure class without parsing the user-facing message.
+//
+// All three are staged behavior. Their default in this release is
+// "off / opt-in" — production deploys must explicitly acknowledge to
+// activate. The default-flip schedule lives in WORKSPACE-ROADMAP.md.
+var (
+	// ErrAgentBootstrapTokenRequired is returned by Validate() when
+	// CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=true and the token is
+	// empty. Phase 2 SEC-H1 closure — staged feature flag (default
+	// false this release; default true scheduled for v2.2.0).
+	ErrAgentBootstrapTokenRequired = errors.New(
+		"CERTCTL_AGENT_BOOTSTRAP_TOKEN is empty and CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=true — refuse to start. " +
+			"Generate a real secret (e.g. openssl rand -base64 32) and set CERTCTL_AGENT_BOOTSTRAP_TOKEN, " +
+			"or unset CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY to keep the warn-mode pass-through default",
+	)
+
+	// ErrACMEInsecureWithoutAck is returned by Validate() when
+	// CERTCTL_ACME_INSECURE=true and CERTCTL_ACME_INSECURE_ACK is missing
+	// or false. Phase 2 SEC-M4 closure: upgrade the existing boot-time
+	// WARN log to a hard refuse-to-start gate behind an explicit ACK.
+	ErrACMEInsecureWithoutAck = errors.New(
+		"CERTCTL_ACME_INSECURE=true but CERTCTL_ACME_INSECURE_ACK is not true — refuse to start. " +
+			"ACME directory TLS verification is DISABLED; every round-trip skips certificate chain validation. " +
+			"Production deploys MUST NOT enable this. To unlock for dev / Pebble / step-ca with self-signed roots, " +
+			"set CERTCTL_ACME_INSECURE_ACK=true alongside CERTCTL_ACME_INSECURE=true",
+	)
+
+	// ErrDemoModeAckExpired is returned by Validate() when
+	// DemoModeAck=true and CERTCTL_DEMO_MODE_ACK_TS is missing or older
+	// than 24h. Phase 2 SEC-H3 closure: the sticky DemoModeAck bit now
+	// expires, forcing operators of accidentally-promoted demo
+	// deployments to re-acknowledge the synthetic-admin posture daily.
+	ErrDemoModeAckExpired = errors.New(
+		"CERTCTL_DEMO_MODE_ACK=true requires CERTCTL_DEMO_MODE_ACK_TS=<unix-epoch> set within the last 24h — refuse to start. " +
+			"This guard catches forgotten demo deployments accidentally left in production. " +
+			"Set CERTCTL_DEMO_MODE_ACK_TS=$(date +%s) at every compose-up; the demo compose helper script does this automatically",
+	)
+)
+
+// demoModeAckMaxAge is the maximum allowable age of
+// CERTCTL_DEMO_MODE_ACK_TS before the demo-mode ACK is considered
+// expired. Hard-coded at 24h per Phase 2 SEC-H3.
+const demoModeAckMaxAge = 24 * time.Hour
 
 // Config represents the complete application configuration.
 // All configuration values are read from environment variables with CERTCTL_ prefix.
@@ -655,6 +704,20 @@ type ACMEConfig struct {
 	// Only use for testing with self-signed ACME servers like Pebble. Never in production.
 	// Setting: CERTCTL_ACME_INSECURE environment variable.
 	Insecure bool
+
+	// InsecureAck is the Phase 2 SEC-M4 closure (2026-05-13): when
+	// Insecure=true, Validate() refuses to start unless InsecureAck is
+	// also true. Pre-Phase-2 the Insecure flag only emitted a boot-time
+	// WARN log; this guard converts that to a hard fail-closed gate so
+	// the dev-only escape hatch cannot be flipped accidentally in
+	// production via a copy-pasted Pebble runbook.
+	//
+	// Acknowledged (Insecure=true + InsecureAck=true): boot proceeds + WARN logs.
+	// Unack'd      (Insecure=true + InsecureAck=false): ErrACMEInsecureWithoutAck.
+	// Off          (Insecure=false): InsecureAck is ignored entirely.
+	//
+	// Setting: CERTCTL_ACME_INSECURE_ACK environment variable.
+	InsecureAck bool
 }
 
 // ACMEServerConfig is the SERVER-side ACME (RFC 8555 + RFC 9773 ARI)
@@ -1590,6 +1653,16 @@ type AuthConfig struct {
 	// Setting: CERTCTL_AGENT_BOOTSTRAP_TOKEN environment variable.
 	AgentBootstrapToken string
 
+	// AgentBootstrapTokenDenyEmpty is the staged feature flag for SEC-H1
+	// (Phase 2, 2026-05-13). When true AND AgentBootstrapToken is empty,
+	// Validate() returns ErrAgentBootstrapTokenRequired and the server
+	// refuses to start. Default: false (warn-mode pass-through preserved
+	// for backward compatibility with operators on the v2.1.x line).
+	// WORKSPACE-ROADMAP.md schedules the default flip to true for the
+	// v2.2.0 cut — operators get one upgrade-window to set a real token.
+	// Setting: CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY environment variable.
+	AgentBootstrapTokenDenyEmpty bool
+
 	// Session holds the Auth Bundle 2 Phase 4 session-service tunables.
 	// Defaults are documented on the SessionConfig fields. The session
 	// service is wired into cmd/server/main.go alongside the OIDC
@@ -1623,6 +1696,22 @@ type AuthConfig struct {
 	// deployments MUST set Type to a real authn type (api-key | oidc).
 	// Setting: CERTCTL_DEMO_MODE_ACK environment variable.
 	DemoModeAck bool
+
+	// DemoModeAckTS is the unix-epoch timestamp at which DemoModeAck was
+	// last acknowledged. Phase 2 SEC-H3 closure (2026-05-13): the sticky
+	// DemoModeAck bit now expires after 24h. When DemoModeAck=true,
+	// Validate() requires DemoModeAckTS to be set AND parse as a unix
+	// epoch within the last demoModeAckMaxAge (24h); otherwise
+	// ErrDemoModeAckExpired fires and the server refuses to start.
+	//
+	// This catches the canonical "demo deployment accidentally
+	// promoted to production and forgotten about" failure mode: the
+	// container restart that re-loads config now refuses unless the
+	// operator re-supplies a fresh timestamp.
+	//
+	// Setting: CERTCTL_DEMO_MODE_ACK_TS (unix epoch, e.g. `$(date +%s)`).
+	// The demo compose helper sets this automatically at compose-up.
+	DemoModeAckTS string
 
 	// DemoModeResidualStrict refuses startup when Auth.Type != none
 	// and `actor-demo-anon` has residual role grants in actor_roles.
@@ -1915,7 +2004,8 @@ func Load() (*Config, error) {
 			Secret: getEnv("CERTCTL_AUTH_SECRET", ""),
 			// Audit 2026-05-10 HIGH-12 closure: required-true to allow
 			// CERTCTL_AUTH_TYPE=none with a non-loopback listen address.
-			DemoModeAck: getEnvBool("CERTCTL_DEMO_MODE_ACK", false),
+			DemoModeAck:   getEnvBool("CERTCTL_DEMO_MODE_ACK", false),
+			DemoModeAckTS: getEnv("CERTCTL_DEMO_MODE_ACK_TS", ""),
 			// Audit 2026-05-11 A-8 closure: when true, the preflight
 			// residual-grants detector refuses startup if actor-demo-anon
 			// has any actor_roles rows. Default false (WARN-only).
@@ -1927,7 +2017,8 @@ func Load() (*Config, error) {
 
 			// Bundle-5 / Audit H-007: agent-registration bootstrap secret.
 			// Empty (default) = warn-mode pass-through; v2.2.0 will require it.
-			AgentBootstrapToken: getEnv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", ""),
+			AgentBootstrapToken:          getEnv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", ""),
+			AgentBootstrapTokenDenyEmpty: getEnvBool("CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY", false),
 			// Bundle 1 Phase 6: one-shot bootstrap token for the
 			// /v1/auth/bootstrap endpoint that mints the first admin
 			// key. Empty = bootstrap endpoint disabled (default).
@@ -2114,6 +2205,7 @@ func Load() (*Config, error) {
 			Profile:                getEnv("CERTCTL_ACME_PROFILE", ""),
 			ARIEnabled:             getEnvBool("CERTCTL_ACME_ARI_ENABLED", false),
 			Insecure:               getEnvBool("CERTCTL_ACME_INSECURE", false),
+			InsecureAck:            getEnvBool("CERTCTL_ACME_INSECURE_ACK", false),
 		},
 		// ACME server (RFC 8555 + RFC 9773 ARI) — distinct from the
 		// consumer-side ACME issuer connector above. Server uses
@@ -2601,6 +2693,60 @@ func (c *Config) Validate() error {
 	// required for "jwt"; removed with the jwt rejection above.)
 	if c.Auth.Type == string(AuthTypeAPIKey) && c.Auth.Secret == "" {
 		return fmt.Errorf("auth secret is required for auth type %s", c.Auth.Type)
+	}
+
+	// Phase 2 SEC-H1 closure (2026-05-13): the AgentBootstrapTokenDenyEmpty
+	// staged feature flag. When the operator opts in via
+	// CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=true AND the bootstrap
+	// token is empty, Validate() returns a fail-closed error. Default
+	// flag value is false, preserving the existing v2.1.x warn-mode
+	// pass-through behavior for backward compatibility. The default-flip
+	// to true is scheduled for v2.2.0 in WORKSPACE-ROADMAP.md — operators
+	// get one upgrade window to set a real token.
+	if c.Auth.AgentBootstrapTokenDenyEmpty && c.Auth.AgentBootstrapToken == "" {
+		return fmt.Errorf("phase-2 SEC-H1 fail-closed guard: %w", ErrAgentBootstrapTokenRequired)
+	}
+
+	// Phase 2 SEC-M4 closure (2026-05-13): convert the existing boot-time
+	// WARN log for CERTCTL_ACME_INSECURE=true into a hard refuse-to-start
+	// gate behind an explicit ACK env var. The dev-only escape hatch can
+	// no longer be flipped accidentally via a copy-pasted Pebble runbook
+	// — production deploys must explicitly set both Insecure=true AND
+	// InsecureAck=true to acknowledge they understand the consequences.
+	// The boot-time WARN log path in cmd/server/main.go continues to fire
+	// for the ACK'd case so the operator sees the reminder every restart.
+	if c.ACME.Insecure && !c.ACME.InsecureAck {
+		return fmt.Errorf("phase-2 SEC-M4 fail-closed guard: %w", ErrACMEInsecureWithoutAck)
+	}
+
+	// Phase 2 SEC-H3 closure (2026-05-13): the sticky DemoModeAck bit
+	// now expires after demoModeAckMaxAge (24h). When the operator sets
+	// CERTCTL_DEMO_MODE_ACK=true, they MUST also set
+	// CERTCTL_DEMO_MODE_ACK_TS=$(date +%s) and re-supply it within the
+	// 24h window on every restart. The demo compose helper script does
+	// this automatically at compose-up. Catches the canonical
+	// "forgotten demo deployment promoted to production" failure mode:
+	// the next container restart refuses unless the operator re-acks.
+	if c.Auth.DemoModeAck {
+		if c.Auth.DemoModeAckTS == "" {
+			return fmt.Errorf("phase-2 SEC-H3 fail-closed guard (missing TS): %w", ErrDemoModeAckExpired)
+		}
+		ackEpoch, err := strconv.ParseInt(strings.TrimSpace(c.Auth.DemoModeAckTS), 10, 64)
+		if err != nil {
+			return fmt.Errorf("phase-2 SEC-H3 fail-closed guard: CERTCTL_DEMO_MODE_ACK_TS=%q must parse as a unix epoch integer (try $(date +%%s)); parse error %w: %w",
+				c.Auth.DemoModeAckTS, err, ErrDemoModeAckExpired)
+		}
+		ackTime := time.Unix(ackEpoch, 0)
+		if time.Since(ackTime) > demoModeAckMaxAge {
+			return fmt.Errorf("phase-2 SEC-H3 fail-closed guard (TS age %s exceeds %s): %w",
+				time.Since(ackTime).Round(time.Second), demoModeAckMaxAge, ErrDemoModeAckExpired)
+		}
+		// Future-dated timestamps are also rejected — likely operator clock skew
+		// or a typo. Allow a small future skew (1m) to absorb minor clock drift.
+		if time.Until(ackTime) > time.Minute {
+			return fmt.Errorf("phase-2 SEC-H3 fail-closed guard (TS is %s in the future, exceeds 1m clock-skew tolerance): %w",
+				time.Until(ackTime).Round(time.Second), ErrDemoModeAckExpired)
+		}
 	}
 
 	// Audit 2026-05-10 HIGH-12 closure: refuse to start when

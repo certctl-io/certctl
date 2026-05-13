@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### Breaking changes (scheduled for v2.2.0)
+
+- **SEC-H1 staged: `CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY` opt-in flag.**
+  Phase 2 of the architecture diligence remediation (2026-05-13) introduces
+  a new env var that, when set to `true`, makes the server refuse to start
+  unless `CERTCTL_AGENT_BOOTSTRAP_TOKEN` is also set to a real value.
+  Default in this release: `false` (preserves the v2.1.x warn-mode
+  pass-through behavior for backward compatibility). Default flip to
+  `true` is scheduled for v2.2.0 per `WORKSPACE-ROADMAP.md`.
+
+  **Operator action before the v2.2.0 upgrade:** generate a real
+  bootstrap token (`openssl rand -base64 32`) and set
+  `CERTCTL_AGENT_BOOTSTRAP_TOKEN` in your env. When v2.2.0 ships, the
+  deny-empty default flips to `true` and a missing or empty token will
+  fail closed at boot. Operators with the token already set: no action
+  required.
+
+- **SEC-M4: `CERTCTL_ACME_INSECURE` now requires explicit ACK.**
+  Pre-Phase-2, `CERTCTL_ACME_INSECURE=true` produced only a boot-time
+  WARN log. Post-Phase-2 (THIS release), the server refuses to start
+  unless `CERTCTL_ACME_INSECURE_ACK=true` is set alongside it. ACME
+  directory TLS verification is the load-bearing defense against a
+  network attacker intercepting ACME enrollment; the existing flag was
+  too easy to flip via a copy-pasted Pebble runbook.
+
+  **Operator action:** if you intentionally run against a self-signed
+  ACME server (Pebble, step-ca, internal dev), add
+  `CERTCTL_ACME_INSECURE_ACK=true` to your env. Production deploys
+  MUST never set either flag.
+
+- **SEC-H3: `CERTCTL_DEMO_MODE_ACK` is no longer sticky — 24h re-ack required.**
+  Pre-Phase-2, setting `CERTCTL_DEMO_MODE_ACK=true` was sticky for the
+  lifetime of the container. Post-Phase-2, operators must ALSO set
+  `CERTCTL_DEMO_MODE_ACK_TS=$(date +%s)` to a unix epoch within the
+  last 24h. The next container restart past 24h refuses to start
+  unless a fresh TS is supplied. Catches the "forgotten demo deployment
+  promoted to production" failure mode.
+
+  **Operator action:** demo deploys must set `CERTCTL_DEMO_MODE_ACK_TS`
+  at every `docker compose up`. The demo Compose helper script handles
+  this automatically when wired; standalone demo deploys add it
+  manually. Production deploys: this guard is irrelevant
+  (`CERTCTL_DEMO_MODE_ACK` should not be set in production).
+
 ### Security
 
 - **Alg-downgrade defense relaxed for Keycloak-shape IdPs (v2.1.0 pre-tag fix).**

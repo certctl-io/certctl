@@ -417,6 +417,11 @@ Every `CERTCTL_*` environment variable is read by the server's `internal/config/
 | `CERTCTL_CORS_ORIGINS` | (empty) | Allowed CORS origins, comma-separated. Empty = deny all cross-origin |
 | `CERTCTL_RATE_LIMIT_RPS` | `10` | Requests per second per client |
 | `CERTCTL_RATE_LIMIT_BURST` | `20` | Burst allowance above RPS |
+| `CERTCTL_AGENT_BOOTSTRAP_TOKEN` | (empty) | Agent-registration bootstrap secret. Empty = v2.1.x warn-mode pass-through. Set to a real value (`openssl rand -base64 32`); the deny-empty flag's default flip in v2.2.0 will require it. |
+| `CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY` | `false` | Phase 2 SEC-H1 staged flag. When `true`, the server refuses to start unless `CERTCTL_AGENT_BOOTSTRAP_TOKEN` is non-empty. Default flip to `true` scheduled for v2.2.0. |
+| `CERTCTL_DEMO_MODE_ACK` | `false` | Acknowledges demo-mode synthetic admin posture (required when `CERTCTL_AUTH_TYPE=none` binds to a non-loopback host). Must be paired with `CERTCTL_DEMO_MODE_ACK_TS` per Phase 2 SEC-H3. |
+| `CERTCTL_DEMO_MODE_ACK_TS` | (empty) | Phase 2 SEC-H3: unix-epoch timestamp at which DemoModeAck was last acknowledged. When `CERTCTL_DEMO_MODE_ACK=true`, this must parse as a unix epoch within the last 24h. Set via `CERTCTL_DEMO_MODE_ACK_TS=$(date +%s)` at every `docker compose up`. |
+| `CERTCTL_ACME_INSECURE_ACK` | `false` | Phase 2 SEC-M4: explicit ACK required to boot with `CERTCTL_ACME_INSECURE=true`. Production deploys MUST never set either flag. |
 
 ### Agent
 

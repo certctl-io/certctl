@@ -403,6 +403,124 @@ the end of step 4, extend the window before step 5.
   from the env var and restart. That's appropriate for a small env-var
   inventory; it would not scale to a per-user-key-issued model.
 
+## Security carve-outs &amp; operator-tunable defaults
+
+Phase 2 of the architecture diligence remediation (2026-05-13)
+consolidated the following carve-outs into one canonical section so
+operators reviewing security posture have a single search target. Each
+entry cites the exact file:line of the carve-out, why it exists, and
+what the operator should do.
+
+### TLS verification — dev escape hatches
+
+certctl has three `InsecureSkipVerify=true` sites that are dev/probe
+escape hatches, never enabled by default in production:
+
+- **Agent dev escape** — `cmd/agent/main.go:179` (wired from
+  `cmd/agent/main.go:61` config field + `cmd/agent/main.go:1371` CLI
+  flag). Operators flip this only when debugging an agent against a
+  self-signed control plane that hasn't been added to the agent's
+  trust store. Document as `--insecure-skip-verify` in the agent's
+  install runbook; the agent logs a startup WARN any time the flag
+  is set. SEC-M3 pins that the carve-out is intentional.
+- **Agent verification probe** — `cmd/agent/verify.go:78`. The probe
+  intentionally opens a TLS connection with verification disabled so
+  it can inspect any certificate the endpoint serves (including
+  self-signed or expired ones — that's the whole point of a probe).
+  The probe never returns trust state to a security-relevant code
+  path; it only reads cert metadata. SEC-M3 pins this.
+- **tlsprobe (network scanner)** — `internal/tlsprobe/probe.go:54`.
+  Same rationale as the agent verify probe — network discovery must
+  introspect any certificate it finds, including the ones with the
+  problems we're scanning for. SEC-M3 pins this.
+
+### F5 target connector — `InsecureSkipVerify` per-config
+
+The F5 target connector exposes an `Insecure: bool` field on its
+per-target config blob (default `false`). When set,
+`internal/connector/target/f5/f5.go:134` builds the HTTP client with
+`InsecureSkipVerify: config.Insecure`. SEC-M5 closure: operator
+opt-in for self-signed F5 BIG-IP device certs; mitigation is to run
+the F5 + the proxy-agent on a network-segmented internal subnet.
+Document in the F5 connector's per-target setup guide.
+
+### ACME issuer — `CERTCTL_ACME_INSECURE` (now gated on ACK)
+
+`internal/connector/issuer/acme/acme.go:201` builds the ACME HTTP
+client with `InsecureSkipVerify: true` for the Pebble integration
+test path. The per-issuer runtime setting comes from
+`CERTCTL_ACME_INSECURE` (`internal/config/config.go:2116`); Phase 2
+SEC-M4 closure (2026-05-13) added the fail-closed gate so the operator
+must ALSO set `CERTCTL_ACME_INSECURE_ACK=true` for the server to boot.
+Production deploys must never set either flag. The boot-time WARN log
+at `cmd/server/main.go:611` continues to fire for the ACK'd case so
+every restart logs the reminder.
+
+### CSP `'unsafe-inline'` on `style-src`
+
+`internal/api/middleware/securityheaders.go:58` ships the dashboard
+CSP with `style-src 'self' 'unsafe-inline'`. This is required because
+Tailwind compiles utility classes into a single stylesheet at build
+time, but inline-style attributes appear in the dashboard via inline
+`<svg>` elements + Recharts' `<ResponsiveContainer>` injecting inline
+width/height. SEC-L1 closure: the carve-out is necessary today; the
+planned tightening flow is the frontend audit's FE-H2 (icon library)
++ decorative-SVG sweep that then unlocks the CSP hardening (drops
+`'unsafe-inline'`).
+
+### Break-glass admin — Argon2id rest-defense reminder
+
+The break-glass admin path (`docs/operator/runbooks/disaster-recovery.md`)
+hashes the operator-supplied password with Argon2id and stores the
+hash in the `breakglass_credentials` table. SEC-L2 reminder: the
+strength of the rest-defense is operator-supplied — pick a password
+with sufficient entropy (≥ 64 random bits via `openssl rand -base64
+12`) and rotate after every use. Argon2id resists offline cracking
+but an operator-supplied "Password123" hashes the same way.
+
+### Body-size limit (1 MB default) — operator-tunable
+
+The `http.MaxBytesReader` wrap caps inbound request bodies at 1 MB
+by default. The cap is necessary defense against unbounded-body DOS
+but catches legitimate operator workflows:
+
+- Bulk truststore PEM bundle uploads (CA bundles for federated trust
+  stores can be > 1 MB).
+- Multi-MB CRL pushes via the CRL-cache endpoint.
+- Bulk-import of certificates with embedded chains.
+
+SEC-L3 closure: operators raise the cap via `CERTCTL_MAX_BODY_SIZE`
+(units: bytes; e.g. `CERTCTL_MAX_BODY_SIZE=10485760` for 10 MB).
+Document in `deploy/ENVIRONMENTS.md`.
+
+### Demo Compose placeholder credentials
+
+`deploy/docker-compose.demo.yml` ships `CERTCTL_AUTH_SECRET=change-me-in-production`,
+`CERTCTL_CONFIG_ENCRYPTION_KEY=change-me-32-char-encryption-key`, and
+`CERTCTL_API_KEY=change-me-in-production` as documented demo
+defaults. The runtime `Validate()` fail-closed guards
+(`internal/config/config.go::Validate`, Bundle 2 2026-05-12) refuse
+to start if those literal strings reach a non-demo config. Phase 2
+DEPL-M2 closure adds a CI guard
+(`scripts/ci-guards/no-change-me-in-prod-compose.sh`) that fails the
+build at PR time if a `change-me-*` literal leaks into a non-demo
+compose file — catching the regression one layer before the runtime
+guard fires.
+
+### Kubernetes NetworkPolicy — operator-opt-in
+
+`deploy/helm/certctl/templates/networkpolicy.yaml` ships the template
+but `deploy/helm/certctl/values.yaml` defaults `networkPolicy.enabled:
+false`. DEPL-M3 rationale: most Kubernetes clusters don't have a
+NetworkPolicy controller installed (kind / minikube / fresh k3s); a
+default-enabled NetworkPolicy renders fine but produces no
+enforcement, and bare-metal `kube-router`-style controllers may
+interpret a permissive default differently. Production deploys with a
+real NetworkPolicy controller (Calico, Cilium, Antrea) flip the
+values key to `true` and tune the policy in their values overlay.
+Document the production-enable in
+`docs/operator/runbooks/ha.md` (added Phase 2 DEPL-H1).
+
 ## Reporting a vulnerability
 
 Email `certctl@proton.me`. Coordinated disclosure preferred; we will
