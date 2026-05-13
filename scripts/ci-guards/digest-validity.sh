@@ -122,30 +122,53 @@ for ref in "${REFS[@]}"; do
     auth_header="Authorization: Bearer $tok"
   fi
 
-  # HEAD the manifest by digest.
-  if [ -n "$auth_header" ]; then
+  # HEAD the manifest by digest, with exponential-backoff retry on
+  # transient registry errors (HTTP 429 rate-limit, 502/503/504 gateway
+  # blips). ghcr.io aggressively rate-limits unauthenticated HEAD
+  # requests against the linuxserver/* namespace; pre-2026-05-13 this
+  # caused intermittent CI failures on the Phase 2 commit's run
+  # (workflow log lscr.io/linuxserver/openssh-server → ghcr.io 429).
+  # Backoff schedule: 2s → 4s → 8s, max 3 retries per ref.
+  build_curl_args() {
+    if [ -n "$auth_header" ]; then
+      echo "-H|$auth_header"
+    fi
+    echo "-H|Accept: application/vnd.oci.image.index.v1+json"
+    echo "-H|Accept: application/vnd.docker.distribution.manifest.list.v2+json"
+    echo "-H|Accept: application/vnd.oci.image.manifest.v1+json"
+    echo "-H|Accept: application/vnd.docker.distribution.manifest.v2+json"
+  }
+  attempt=0
+  max_attempts=3
+  code="000"
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    mapfile -t cargs < <(build_curl_args)
+    cargs_expanded=()
+    for arg in "${cargs[@]}"; do
+      IFS='|' read -r flag val <<< "$arg"
+      cargs_expanded+=("$flag" "$val")
+    done
     code=$(curl -sS -o /dev/null -w "%{http_code}" \
-      -H "$auth_header" \
-      -H "Accept: application/vnd.oci.image.index.v1+json" \
-      -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-      -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-      -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+      "${cargs_expanded[@]}" \
       "https://${registry}/v2/${img}/manifests/${digest}")
-  else
-    code=$(curl -sS -o /dev/null -w "%{http_code}" \
-      -H "Accept: application/vnd.oci.image.index.v1+json" \
-      -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-      -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-      -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-      "https://${registry}/v2/${img}/manifests/${digest}")
-  fi
+    # Success or non-retryable failure → stop.
+    if [ "$code" = "200" ] || ! [[ "$code" =~ ^(429|502|503|504)$ ]]; then
+      break
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -lt "$max_attempts" ]; then
+      sleep_secs=$((2 ** attempt))
+      echo "  retry $attempt/$max_attempts after HTTP $code on $ref (sleep ${sleep_secs}s)"
+      sleep "$sleep_secs"
+    fi
+  done
 
   if [ "$code" != "200" ]; then
     echo "::error::digest does not resolve: ${ref}"
     echo "  registry: $registry"
     echo "  image:    $img"
     echo "  digest:   $digest"
-    echo "  HTTP:     $code"
+    echo "  HTTP:     $code  (retried $attempt time(s) for 429/502/503/504)"
     fail=1
   else
     echo "OK  $ref"
