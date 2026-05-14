@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/user"
 	"strconv"
-	"syscall"
 )
 
 // runningAsRoot reports whether the current process has uid 0.
@@ -198,12 +197,13 @@ func lookupGID(groupname string) (int, error) {
 // unixOwnerFromStat extracts (uid, gid) from a Unix-style FileInfo.
 // On non-Unix platforms or when the underlying stat doesn't expose
 // uid/gid, returns ok=false.
-func unixOwnerFromStat(fi os.FileInfo) (uid int, gid int, ok bool) {
-	if fi == nil {
-		return -1, -1, false
-	}
-	if sysStat, isUnix := fi.Sys().(*syscall.Stat_t); isUnix {
-		return int(sysStat.Uid), int(sysStat.Gid), true
-	}
-	return -1, -1, false
-}
+//
+// Platform-specific implementations live in:
+//   - ownership_unix.go    (//go:build unix — uses *syscall.Stat_t)
+//   - ownership_windows.go (//go:build windows — stub returns false)
+//
+// The split exists because syscall.Stat_t is Unix-only — Windows
+// has no equivalent shape, so any production tsx that names it
+// fails to compile on GOOS=windows. The cross-platform-build CI
+// matrix caught this at Hotfix #16; the function was originally
+// in this file pre-split.
