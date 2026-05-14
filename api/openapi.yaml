@@ -75,6 +75,17 @@ tags:
   - name: EST
     description: Enrollment over Secure Transport (RFC 7030)
   - name: SCEP
+  - name: Sessions
+    description: |
+      Server-side session management. Phase 13 Sprint 13.4 (ARCH-H1
+      closure batch 1) — authored against the Phase 9 Sprint 11
+      sibling-file handlers at internal/api/handler/auth_session_oidc_sessions.go.
+  - name: OIDC
+    description: |
+      OIDC identity-provider configuration + group-mapping admin.
+      Phase 13 Sprint 13.4 — authored against the Phase 9 Sprint 11
+      sibling-file handlers at internal/api/handler/auth_session_oidc_crud.go +
+      the JWKS-status surface at internal/api/handler/auth_users.go.
     description: Simple Certificate Enrollment Protocol (RFC 8894)
 
 paths:
@@ -633,6 +644,385 @@ paths:
         "403": { description: Forbidden }
         "404": { description: Role not assigned to actor }
         "409": { description: Reserved system actor cannot be modified }
+
+  # ════════════════════════════════════════════════════════════════════
+  # Phase 13 Sprint 13.4 (ARCH-H1 batch 1) — sessions + OIDC CRUD.
+  # Authored 2026-05-14 against the Phase 9 Sprint 11 handler
+  # sibling-files at internal/api/handler/auth_session_oidc_*.go.
+  # Each schema field-by-field mirrors the projection types
+  # (sessionResponse / oidcProviderResponse / oidcProviderRequest /
+  # groupMappingResponse / groupMappingRequest) in
+  # auth_session_oidc_{sessions,crud}.go.
+  # ════════════════════════════════════════════════════════════════════
+
+  /api/v1/auth/sessions:
+    get:
+      tags: [Sessions]
+      summary: List active sessions (own actor by default; specify actor_id to list another actor's)
+      description: |
+        Permission `auth.session.list` for own-sessions. Listing another
+        actor's sessions additionally requires `auth.session.list.all`
+        (re-checked inline by the handler; the router-level rbacGate
+        cannot see the query parameter).
+
+        Audit 2026-05-10 MED-2 closure — the all-actors variant is an
+        admin-class capability, segregated from the same-actor floor.
+      operationId: listAuthSessions
+      parameters:
+        - in: query
+          name: actor_id
+          required: false
+          schema: { type: string }
+          description: Target actor whose sessions to list. Defaults to the calling actor.
+        - in: query
+          name: actor_type
+          required: false
+          schema: { type: string }
+          description: Required when `actor_id` is set and differs from the caller's type. Ignored otherwise.
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthSession"
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden (auth.session.list missing, or auth.session.list.all missing on cross-actor lookup) }
+        "500": { description: Internal error }
+    delete:
+      tags: [Sessions]
+      summary: Revoke all sessions for the caller except the current one
+      description: |
+        Permission `auth.session.revoke`. Revokes every active session
+        for the calling actor EXCEPT the session that issued this
+        request (so the user isn't logged out by the action they just
+        took). Bearer/API-key callers (whose request has no session
+        cookie) get all their sessions revoked.
+
+        Audit 2026-05-10 MED-3 closure — backs the SessionsPage's
+        "Sign out all other sessions" button.
+
+        Only the `?except=current` form is accepted; any other query
+        parameter combination returns 400.
+      operationId: revokeAuthSessionsExceptCurrent
+      parameters:
+        - in: query
+          name: except
+          required: true
+          schema: { type: string, enum: [current] }
+          description: Must be the literal string `current`.
+      responses:
+        "200":
+          description: Revoked count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked_count]
+                properties:
+                  revoked_count:
+                    type: integer
+                    description: Number of sessions revoked (excludes the current session).
+        "400": { description: Missing or unsupported query parameters }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal error }
+
+  /api/v1/auth/sessions/{id}:
+    delete:
+      tags: [Sessions]
+      summary: Revoke a specific session by ID
+      description: |
+        Permission `auth.session.revoke`. Revoking your own session is
+        always allowed (any authenticated caller); revoking another
+        actor's session requires the same `auth.session.revoke`
+        permission enforced at the rbacGate.
+      operationId: revokeAuthSession
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          description: Session ID.
+      responses:
+        "204": { description: Revoked }
+        "400": { description: Missing session id }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Session not found }
+        "500": { description: Internal error }
+
+  /api/v1/auth/oidc/providers:
+    get:
+      tags: [OIDC]
+      summary: List configured OIDC identity providers
+      description: Permission `auth.oidc.list`. Returns provider rows for the calling actor's tenant.
+      operationId: listOIDCProviders
+      responses:
+        "200":
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [providers]
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OIDCProviderResponse"
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal error }
+    post:
+      tags: [OIDC]
+      summary: Create an OIDC identity provider
+      description: |
+        Permission `auth.oidc.create`. `client_secret` is required +
+        encrypted at rest via the config-encryption key
+        (`CERTCTL_CONFIG_ENCRYPTION_KEY`). The provider is namespaced
+        by the caller's tenant.
+      operationId: createOIDCProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCProviderRequest"
+      responses:
+        "201":
+          description: Provider created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCProviderResponse"
+        "400": { description: Validation error (missing client_secret, invalid JSON, etc.) }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "409": { description: Provider name already exists for this tenant }
+        "500": { description: Internal error }
+
+  /api/v1/auth/oidc/providers/{id}:
+    put:
+      tags: [OIDC]
+      summary: Update an OIDC identity provider's configuration
+      description: |
+        Permission `auth.oidc.edit`. Update is a full replacement: every
+        OIDCProviderRequest field is honored; `client_secret` is
+        re-encrypted on every update.
+      operationId: updateOIDCProvider
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCProviderRequest"
+      responses:
+        "200":
+          description: Provider updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCProviderResponse"
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Provider not found }
+        "500": { description: Internal error }
+    delete:
+      tags: [OIDC]
+      summary: Delete an OIDC identity provider
+      description: |
+        Permission `auth.oidc.delete`. 409 Conflict is returned when the
+        provider has active group-mappings or live sessions referencing
+        it (the operator must remove the dependencies first).
+      operationId: deleteOIDCProvider
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Provider deleted }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Provider not found }
+        "409": { description: Provider in use (active group-mappings or sessions reference it) }
+        "500": { description: Internal error }
+
+  /api/v1/auth/oidc/providers/{id}/jwks-status:
+    get:
+      tags: [OIDC]
+      summary: Read per-provider JWKS health (cached keys, refresh count, last error)
+      description: |
+        Permission `auth.oidc.list`. Audit 2026-05-10 MED-7 — surfaces
+        the JWKS verifier state for the named provider so operators can
+        diagnose IdP key-rotation issues without server logs.
+      operationId: getOIDCProviderJWKSStatus
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: JWKS health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCJWKSStatusSnapshot"
+        "400": { description: Missing provider id }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Provider not found }
+        "500": { description: Internal error }
+
+  /api/v1/auth/oidc/providers/{id}/refresh:
+    post:
+      tags: [OIDC]
+      summary: Force re-fetch of the IdP discovery doc + JWKS for a provider
+      description: |
+        Permission `auth.oidc.edit`. Triggers an immediate refetch of
+        the named provider's OIDC discovery document + JWKS, re-runs
+        the IdP downgrade-attack defense (Audit 2026-05-10 HIGH-6),
+        and updates the in-memory verifier cache. Used by the
+        SessionsPage "Refresh JWKS" button when an operator rotates
+        IdP keys out-of-band.
+      operationId: refreshOIDCProvider
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Refresh complete
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refreshed]
+                properties:
+                  refreshed:
+                    type: boolean
+                    description: Always `true` on success.
+        "400": { description: Missing provider id, or upstream refresh failed }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Provider not found }
+        "500": { description: Internal error }
+
+  /api/v1/auth/oidc/test:
+    post:
+      tags: [OIDC]
+      summary: Dry-run an OIDC provider config without persisting
+      description: |
+        Permission `auth.oidc.create`. Audit 2026-05-10 MED-5 — fetches
+        the candidate issuer's discovery doc + JWKS, runs the
+        alg-downgrade defense, parses the RFC 9207 iss-parameter
+        advert, and returns the per-check report so the GUI can
+        render a discovery-validation panel before the operator
+        commits to creating the provider.
+      operationId: testOIDCProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCTestRequest"
+      responses:
+        "200":
+          description: Discovery + JWKS test report (partial-success cases return 200 with non-empty `errors`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCTestDiscoveryResult"
+        "400": { description: Missing issuer_url, or invalid JSON body }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal error (discovery test framework failure) }
+
+  /api/v1/auth/oidc/group-mappings:
+    get:
+      tags: [OIDC]
+      summary: List group → role mappings for a provider
+      description: Permission `auth.oidc.list`. `provider_id` query parameter is required.
+      operationId: listOIDCGroupMappings
+      parameters:
+        - in: query
+          name: provider_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Group-mapping list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mappings]
+                properties:
+                  mappings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OIDCGroupMappingResponse"
+        "400": { description: Missing provider_id }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal error }
+    post:
+      tags: [OIDC]
+      summary: Add a group → role mapping
+      description: Permission `auth.oidc.edit`. Establishes that members of `group_name` (as advertised by the IdP) receive the named role for the calling tenant.
+      operationId: addOIDCGroupMapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCGroupMappingRequest"
+      responses:
+        "201":
+          description: Mapping created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCGroupMappingResponse"
+        "400": { description: Validation error (invalid JSON or missing required fields) }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "409": { description: Mapping already exists (same provider_id + group_name) }
+        "500": { description: Internal error }
+
+  /api/v1/auth/oidc/group-mappings/{id}:
+    delete:
+      tags: [OIDC]
+      summary: Remove a group → role mapping
+      description: Permission `auth.oidc.edit`.
+      operationId: removeOIDCGroupMapping
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Mapping removed }
+        "400": { description: Missing mapping id }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Mapping not found }
+        "500": { description: Internal error }
 
   /api/v1/version:
     get:
@@ -6411,3 +6801,263 @@ components:
         error:
           type: string
           description: Error message when verification failed
+
+    # ════════════════════════════════════════════════════════════════════
+    # Phase 13 Sprint 13.4 (ARCH-H1 batch 1) schemas. Field-by-field
+    # mirror of the projection types in
+    # internal/api/handler/auth_session_oidc_{sessions,crud}.go +
+    # internal/auth/oidc/test_discovery.go +
+    # internal/auth/oidc/service.go::JWKSStatusSnapshot.
+    # ════════════════════════════════════════════════════════════════════
+
+    AuthSession:
+      type: object
+      description: Mirrors internal/api/handler/auth_session_oidc_sessions.go::sessionResponse.
+      required: [id, actor_id, actor_type, created_at, last_seen_at, idle_expires_at, absolute_expires_at, revoked]
+      properties:
+        id:
+          type: string
+          description: Session identifier (UUID-shaped).
+        actor_id:
+          type: string
+          description: Owning actor (user, API key, etc.).
+        actor_type:
+          type: string
+          description: Actor type — `user`, `api_key`, or `actor-demo-anon` in demo mode.
+        ip_address:
+          type: string
+          description: Source IP at session create-time. Omitted when not recorded.
+        user_agent:
+          type: string
+          description: User-Agent header at session create-time. Omitted when not recorded.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp the session was minted.
+        last_seen_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp the session most-recently validated a request.
+        idle_expires_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp past which the session is idle-expired (CERTCTL_SESSION_IDLE_TIMEOUT from last_seen_at).
+        absolute_expires_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp past which the session is absolute-expired regardless of activity (CERTCTL_SESSION_ABSOLUTE_TIMEOUT from created_at).
+        revoked:
+          type: boolean
+          description: True when the session has been revoked (via this API or via back-channel-logout).
+
+    OIDCProviderResponse:
+      type: object
+      description: Mirrors internal/api/handler/auth_session_oidc_crud.go::oidcProviderResponse.
+      required:
+        [id, tenant_id, name, issuer_url, client_id, redirect_uri,
+         groups_claim_path, groups_claim_format, fetch_userinfo,
+         iat_window_seconds, jwks_cache_ttl_seconds, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Provider identifier (`op-` + base64-URL random suffix).
+        tenant_id:
+          type: string
+          description: Owning tenant.
+        name:
+          type: string
+          description: Operator-facing provider name (unique per tenant).
+        issuer_url:
+          type: string
+          description: Canonical OIDC issuer URL. Must match the `iss` claim on returned ID tokens.
+        client_id:
+          type: string
+          description: Client identifier registered with the IdP.
+        redirect_uri:
+          type: string
+          description: Absolute URL the IdP redirects to after authorization.
+        groups_claim_path:
+          type: string
+          description: JSONPath-style claim path that the group→role mapper reads (default `groups`).
+        groups_claim_format:
+          type: string
+          description: How the claim is shaped (default `string_array`).
+        fetch_userinfo:
+          type: boolean
+          description: Whether to call the IdP's userinfo endpoint after token exchange (extends the available claims surface).
+        scopes:
+          type: array
+          items: { type: string }
+          description: OAuth scopes requested at authorization (typically `openid`, `email`, `profile`, and optionally `groups`).
+        allowed_email_domains:
+          type: array
+          items: { type: string }
+          description: Whitelisted email-domain suffixes; empty means accept any email-domain.
+        iat_window_seconds:
+          type: integer
+          description: Maximum allowed iat-skew for received ID tokens (default 300).
+        jwks_cache_ttl_seconds:
+          type: integer
+          description: JWKS cache TTL before refetch (default 3600).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    OIDCProviderRequest:
+      type: object
+      description: Mirrors internal/api/handler/auth_session_oidc_crud.go::oidcProviderRequest. `client_secret` is plaintext on the wire only at create/update time; encrypted at rest via `CERTCTL_CONFIG_ENCRYPTION_KEY`.
+      required: [name, issuer_url, client_id, client_secret, redirect_uri]
+      properties:
+        name:
+          type: string
+        issuer_url:
+          type: string
+        client_id:
+          type: string
+        client_secret:
+          type: string
+          format: password
+          description: IdP client secret. Encrypted at rest after submission; never echoed back on read endpoints.
+        redirect_uri:
+          type: string
+        groups_claim_path:
+          type: string
+          description: Optional; defaults to `groups` when blank.
+        groups_claim_format:
+          type: string
+          description: Optional; defaults to `string_array` when blank.
+        fetch_userinfo:
+          type: boolean
+        scopes:
+          type: array
+          items: { type: string }
+        allowed_email_domains:
+          type: array
+          items: { type: string }
+        iat_window_seconds:
+          type: integer
+          description: Optional; defaults to 300 when zero.
+        jwks_cache_ttl_seconds:
+          type: integer
+          description: Optional; defaults to 3600 when zero.
+
+    OIDCTestRequest:
+      type: object
+      description: Mirrors the anonymous struct inside auth_session_oidc_crud.go::TestProvider. Discovery-only dry-run; the IdP's discovery + JWKS are fetched and validated WITHOUT persisting anything.
+      required: [issuer_url]
+      properties:
+        issuer_url:
+          type: string
+          description: Candidate OIDC issuer URL to dry-run.
+        client_id:
+          type: string
+          description: Optional — only used to confirm the discovery doc advertises matching audience.
+        client_secret:
+          type: string
+          format: password
+          description: Optional — discovery + JWKS don't require it, but the GUI passes it through so the dry-run shape matches CreateProvider's surface.
+        scopes:
+          type: array
+          items: { type: string }
+
+    OIDCTestDiscoveryResult:
+      type: object
+      description: Mirrors internal/auth/oidc/test_discovery.go::TestDiscoveryResult. Each field is independently observable so the GUI can render a per-check status row. `errors` is non-empty for both total failures (200 with all checks false) and partial-success cases (200 with some checks true).
+      required: [discovery_succeeded, jwks_reachable, supported_alg_values, iss_param_supported, current_kids]
+      properties:
+        discovery_succeeded:
+          type: boolean
+          description: True when `<issuer>/.well-known/openid-configuration` fetched + parsed cleanly.
+        jwks_reachable:
+          type: boolean
+          description: True when the JWKS URI advertised by the discovery doc returned a JWKS document.
+        supported_alg_values:
+          type: array
+          items: { type: string }
+          description: ID-token signing algorithms the IdP advertises support for.
+        iss_param_supported:
+          type: boolean
+          description: True when the discovery doc advertises support for RFC 9207 `iss` parameter (cross-IdP mix-up defense).
+        issuer_echo:
+          type: string
+          description: The `iss` value the IdP's discovery doc advertises; surfaces IdP misconfigurations where this differs from the issuer URL the operator submitted.
+        authorization_url:
+          type: string
+        token_url:
+          type: string
+        jwks_uri:
+          type: string
+        userinfo_endpoint:
+          type: string
+        current_kids:
+          type: array
+          items: { type: string }
+          description: Current key-IDs reachable in the JWKS document at probe time. Always present in the response payload (empty array when no keys are reachable).
+        errors:
+          type: array
+          items: { type: string }
+          description: Per-leg failure messages; empty on full success, non-empty on partial-success and full-failure cases.
+
+    OIDCJWKSStatusSnapshot:
+      type: object
+      description: Mirrors internal/auth/oidc/service.go::JWKSStatusSnapshot. Per-provider JWKS verifier counters surfaced for operator diagnostics.
+      required: [current_kids, refresh_count, rejected_jws_count, iss_param_supported]
+      properties:
+        last_refresh_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp the JWKS was most-recently refreshed. Omitted before the first refresh.
+        current_kids:
+          type: array
+          items: { type: string }
+          description: Currently-cached JWKS key IDs.
+        refresh_count:
+          type: integer
+          description: Lifetime count of JWKS refresh fetches for this provider.
+        last_error:
+          type: string
+          description: Last refresh-error message; omitted when no refresh has failed.
+        rejected_jws_count:
+          type: integer
+          description: Lifetime count of JWS verifications rejected against this provider's JWKS (debugging hint for IdP key-rotation issues).
+        iss_param_supported:
+          type: boolean
+          description: Whether the provider's discovery doc advertised RFC 9207 `iss` parameter support at the most recent refresh.
+
+    OIDCGroupMappingResponse:
+      type: object
+      description: Mirrors internal/api/handler/auth_session_oidc_crud.go::groupMappingResponse.
+      required: [id, provider_id, group_name, role_id, tenant_id, created_at]
+      properties:
+        id:
+          type: string
+          description: Mapping identifier (`grm-` + base64-URL random suffix).
+        provider_id:
+          type: string
+          description: Owning OIDC provider.
+        group_name:
+          type: string
+          description: Group name as advertised by the IdP's groups claim.
+        role_id:
+          type: string
+          description: Role granted to members of `group_name` for this provider/tenant.
+        tenant_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    OIDCGroupMappingRequest:
+      type: object
+      description: Mirrors internal/api/handler/auth_session_oidc_crud.go::groupMappingRequest. Tenant is derived from the calling actor; not accepted from the request body.
+      required: [provider_id, group_name, role_id]
+      properties:
+        provider_id:
+          type: string
+        group_name:
+          type: string
+        role_id:
+          type: string

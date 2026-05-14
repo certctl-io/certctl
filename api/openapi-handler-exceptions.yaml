@@ -41,15 +41,17 @@
 # ──────────────────────────────────────────────────────────────────────
 #
 # Current split, re-derived by the parity script's bucket-reporting
-# subcommand:
+# subcommand (post-Sprint-13.4 / 2026-05-14):
 #
-#   total entries:           64
+#   total entries:           51
 #   wire-protocol:           36
-#   rest-deferred:           28
+#   rest-deferred:           15
 #
-# Burn-down plan for the rest-deferred bucket (Phase 13 Sprints 13.4-13.6):
+# Burn-down progress + remaining plan for the rest-deferred bucket:
 #
-#   Sprint 13.4 → 28 - 13 = 15 (auth/sessions + auth/oidc cluster, 13 ops)
+#   Sprint 13.4 SHIPPED — 28 - 13 = 15 (auth/sessions cluster 3 ops +
+#                               auth/oidc CRUD + JWKS + test + refresh
+#                               + group-mappings cluster, 10 ops)
 #   Sprint 13.5 → 15 -  8 =  7 (auth/breakglass + auth/users +
 #                               auth/runtime-config, 8 ops)
 #   Sprint 13.6 →  7 -  7 =  0 (audit/export + demo-residual + 3
@@ -208,45 +210,6 @@ documented_exceptions:
     category: rest-deferred
   - route: "POST /auth/oidc/back-channel-logout"
     why: "Bundle 2 Phase 5 RFC OIDC Back-Channel Logout 1.0 endpoint. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "GET /api/v1/auth/sessions"
-    why: "Bundle 2 Phase 5 self/admin session list. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "DELETE /api/v1/auth/sessions/{id}"
-    why: "Bundle 2 Phase 5 session revoke. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "DELETE /api/v1/auth/sessions"
-    why: "Bundle 2 audit-2026-05-10 MED-2/3 revoke-all-except-current."
-    category: rest-deferred
-  - route: "GET /api/v1/auth/oidc/providers"
-    why: "Bundle 2 Phase 5 OIDC provider CRUD (list)."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/oidc/providers"
-    why: "Bundle 2 Phase 5 OIDC provider CRUD (create)."
-    category: rest-deferred
-  - route: "PUT /api/v1/auth/oidc/providers/{id}"
-    why: "Bundle 2 Phase 5 OIDC provider CRUD (update)."
-    category: rest-deferred
-  - route: "DELETE /api/v1/auth/oidc/providers/{id}"
-    why: "Bundle 2 Phase 5 OIDC provider CRUD (delete)."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/oidc/providers/{id}/refresh"
-    why: "Bundle 2 audit-2026-05-10 MED-7 JWKS hot-refresh."
-    category: rest-deferred
-  - route: "GET /api/v1/auth/oidc/providers/{id}/jwks-status"
-    why: "Bundle 2 audit-2026-05-10 MED-7 JWKS health snapshot."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/oidc/test"
-    why: "Bundle 2 audit-2026-05-10 MED-5 dry-run discovery + JWKS + alg-downgrade check."
-    category: rest-deferred
-  - route: "GET /api/v1/auth/oidc/group-mappings"
-    why: "Bundle 2 Phase 5 group-mapping CRUD (list)."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/oidc/group-mappings"
-    why: "Bundle 2 Phase 5 group-mapping CRUD (create)."
-    category: rest-deferred
-  - route: "DELETE /api/v1/auth/oidc/group-mappings/{id}"
-    why: "Bundle 2 Phase 5 group-mapping CRUD (delete)."
     category: rest-deferred
   - route: "GET /api/v1/auth/breakglass/credentials"
     why: "Bundle 2 Phase 7.5 admin break-glass list (404 when disabled; password hash never on wire)."
