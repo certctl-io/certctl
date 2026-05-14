@@ -1,0 +1,89 @@
+{{- /*
+Phase 4 DEPL-M1 closure (2026-05-14): Helm pre-install / pre-upgrade
+hook that runs Postgres migrations before the server Deployment rolls.
+
+Pre-DEPL-M1, postgres.RunMigrations was invoked at server boot
+(cmd/server/main.go:151) as the only migration path. That works for
+Compose deployments but conflicts with Kubernetes rolling deploys:
+when a new server image lands with a schema change, multiple replicas
+race the migration during the rollout. The hook resolves the race by
+running migrations OUT OF BAND, exactly once, before any new server
+pod starts.
+
+How it works:
+  - The Job ships the same certctl-server image as the Deployment, so
+    the migration code path is binary-identical to the boot-time path.
+  - It runs `certctl-server --migrate-only` (a flag the cmd/server
+    main process must support — see cmd/server/main.go for the flag
+    parse + early-exit path).
+  - The CERTCTL_MIGRATIONS_VIA_HOOK=true env var is ALSO set on the
+    server Deployment (via values.yaml). When the server boots, it
+    sees this env var and skips its own RunMigrations call — the
+    hook already did the work. Compose deploys don't set the env
+    var, so they keep the boot-time path unchanged.
+  - hook-delete-policy hook-succeeded means the Job is cleaned up
+    automatically on success but retained on failure for operator
+    diagnosis.
+  - The hook-weight ensures the migration Job runs before any other
+    pre-install/pre-upgrade resources (the StatefulSet's PVC has to
+    exist first; in practice the StatefulSet has no hook so it lands
+    naturally in the install phase after the Job completes).
+
+Operators on Compose: this hook is a no-op for you. The server still
+runs migrations at boot per the existing path.
+*/ -}}
+{{- if .Values.migrations.viaHook }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "certctl.fullname" . }}-migrate
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit | default 1 }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds | default 600 }}
+  template:
+    metadata:
+      labels:
+        {{- include "certctl.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "certctl.serviceAccountName" . }}
+      securityContext:
+        {{- include "certctl.podSecurityContext" .Values.server.securityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "certctl.serverImage" . }}
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          # Migration-only entrypoint. The server binary supports a
+          # --migrate-only flag that runs postgres.RunMigrations +
+          # postgres.RunSeed and exits cleanly (zero on success,
+          # non-zero on migration failure). See cmd/server/main.go
+          # for the implementation. The flag is hermetic — no HTTP
+          # listener starts, no scheduler ticks, no signing
+          # operations occur. Pure schema-mutation pass.
+          command:
+            - /app/server
+            - --migrate-only
+          env:
+            - name: CERTCTL_DATABASE_URL
+              value: {{ include "certctl.databaseURL" . | quote }}
+            - name: CERTCTL_LOG_LEVEL
+              value: {{ .Values.server.logging.level | default "info" | quote }}
+            - name: CERTCTL_LOG_FORMAT
+              value: {{ .Values.server.logging.format | default "json" | quote }}
+          resources:
+            {{- toYaml (.Values.migrations.resources | default .Values.server.resources) | nindent 12 }}
+          securityContext:
+            {{- include "certctl.containerSecurityContext" .Values.server.securityContext | nindent 12 }}
+{{- end }}

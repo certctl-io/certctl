@@ -9,6 +9,21 @@ metadata:
 spec:
   serviceName: {{ include "certctl.fullname" . }}-postgres
   replicas: 1
+  # Phase 4 DEPL-M4 closure (2026-05-14): explicit StatefulSet update +
+  # pod-management strategies. Defaults make Postgres upgrades
+  # operator-controlled rather than automatic:
+  #   updateStrategy.type: OnDelete — Postgres pods do NOT roll
+  #     automatically when the StatefulSet spec changes. Operator
+  #     deletes the pod explicitly after taking a backup + reviewing
+  #     the change. Prevents an accidental Helm-template tweak from
+  #     triggering a database restart at an awkward time.
+  #   podManagementPolicy: OrderedReady — when scaling Postgres to
+  #     a replica >1 (future HA work), pods come up one at a time
+  #     and must reach Ready before the next pod is created. Aligns
+  #     with the standard Postgres-on-Kubernetes pattern.
+  updateStrategy:
+    type: OnDelete
+  podManagementPolicy: OrderedReady
   selector:
     matchLabels:
       {{- include "certctl.postgresSelectorLabels" . | nindent 6 }}

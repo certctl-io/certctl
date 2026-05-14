@@ -176,6 +176,15 @@ jobs:
       # 167 legitimate tests for no observable behavior change. The
       # Test<Func>_<Scenario>_<ExpectedResult> form remains the
       # recommended pattern for parameterized scenarios, but is not gated.
+      # Phase 4 DEPL-* prerequisite (2026-05-14): helm-templates-lint.sh
+      # needs the `helm` CLI on PATH to run helm lint + helm template
+      # against the chart. The official azure/setup-helm action installs
+      # a SHA-pinned helm binary into the runner.
+      - name: Install Helm (for helm-templates-lint guard)
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112  # v4.3.0
+        with:
+          version: v3.16.0
+
       - name: Regression guards (extracted to scripts/ci-guards/)
         # All named regression guards live at scripts/ci-guards/<id>.sh per
         # ci-pipeline-cleanup bundle Phase 1. Each guard is callable locally:

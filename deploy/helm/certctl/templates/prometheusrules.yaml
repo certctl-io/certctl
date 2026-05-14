@@ -1,0 +1,145 @@
+{{- /*
+Phase 4 DEPL-L2 closure (2026-05-14): opt-in Prometheus AlertManager
+rules covering the four operationally-actionable alerts every certctl
+deployment wants out of the box.
+
+OPERATOR OPT-IN. Default `monitoring.prometheusRules.enabled: false`.
+Turning it on requires Prometheus Operator CRDs (PrometheusRule kind)
+to be installed in-cluster. Without them this template renders an
+object Kubernetes will reject — keep the toggle off if you're scraping
+with vanilla Prometheus + a Helm-installed AlertManager rules
+ConfigMap instead.
+
+Metric names + thresholds verified against the actual
+internal/api/handler/metrics.go exposition path:
+  - certctl_certificate_expiring_soon: server-side count of certs with
+    ExpiresAt in (now, now + 30d]. The 30-day window is computed in
+    internal/service/stats.go::GetDashboardSummary.
+  - certctl_agent_online: agents with heartbeat in the last 5 minutes.
+    A drop below certctl_agent_total signals offline agents.
+  - certctl_job_failed_total + certctl_job_completed_total: cumulative
+    counters; ratio gives the failure rate over the rate() window.
+  - certctl_issuance_failures_total: cumulative counter of failed
+    issuance attempts (renewal failures are issuance failures with a
+    specific error_class label).
+
+Adjust thresholds per fleet — the defaults below are tuned for the
+demo dataset (15 certs / 1 agent) and may need raising for production
+fleets with thousands of certs where a steady rate of expiring certs
+is the normal operating state.
+*/ -}}
+{{- if and .Values.monitoring.enabled .Values.monitoring.prometheusRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "certctl.fullname" . }}-rules
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: monitoring
+    {{- with .Values.monitoring.prometheusRules.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: certctl.alerts
+      interval: {{ .Values.monitoring.prometheusRules.interval | default "60s" }}
+      rules:
+        # ---------------------------------------------------------------
+        # Alert: CertctlCertificateExpiringSoon
+        # Series: certctl_certificate_expiring_soon
+        # The certctl-server counts certs with ExpiresAt in
+        # (now, now + 30d] every metrics scrape. Fires whenever any cert
+        # crosses into that window — operator must triage or extend
+        # automation coverage. Rapid renewal infrastructure should keep
+        # this number small in steady state.
+        # ---------------------------------------------------------------
+        - alert: CertctlCertificateExpiringSoon
+          expr: certctl_certificate_expiring_soon > {{ .Values.monitoring.prometheusRules.thresholds.expiringCertificateCount | default 0 }}
+          for: {{ .Values.monitoring.prometheusRules.thresholds.expiringCertificateFor | default "5m" }}
+          labels:
+            severity: warning
+            component: certctl
+          annotations:
+            summary: "certctl: {{`{{ $value }}`}} certificate(s) expiring within 30 days"
+            description: >-
+              certctl_certificate_expiring_soon has been > {{ .Values.monitoring.prometheusRules.thresholds.expiringCertificateCount | default 0 }}
+              for 5+ minutes. Investigate via
+              /api/v1/certificates?status=expiring or the dashboard's
+              Expiring tab. If renewal automation should have covered
+              these, check the renewal scheduler logs for the cert IDs
+              + the per-issuer failure rate.
+
+        # ---------------------------------------------------------------
+        # Alert: CertctlAgentOffline
+        # Series: certctl_agent_total - certctl_agent_online
+        # Agents flip from online → offline after 5 minutes without a
+        # heartbeat (internal/service/stats.go::GetDashboardSummary).
+        # The 1h `for:` window prevents a flapping agent from paging the
+        # operator on every transient network blip.
+        # ---------------------------------------------------------------
+        - alert: CertctlAgentOffline
+          expr: (certctl_agent_total - certctl_agent_online) > {{ .Values.monitoring.prometheusRules.thresholds.offlineAgentCount | default 0 }}
+          for: {{ .Values.monitoring.prometheusRules.thresholds.offlineAgentFor | default "1h" }}
+          labels:
+            severity: warning
+            component: certctl-agent
+          annotations:
+            summary: "certctl: {{`{{ $value }}`}} agent(s) offline for >1h"
+            description: >-
+              One or more certctl-agent instances have been without a
+              heartbeat for over an hour. Check the agent logs on the
+              affected hosts. If the agent host is intentionally
+              decommissioned, retire the agent via the dashboard or
+              POST /api/v1/agents/{id}/retire to suppress this alert.
+
+        # ---------------------------------------------------------------
+        # Alert: CertctlJobFailureRateHigh
+        # Series: certctl_job_failed_total / (certctl_job_failed_total + certctl_job_completed_total)
+        # Computes the failure rate over a 15-minute rate() window so
+        # short bursts don't fire but a sustained issue does. The 5%
+        # threshold is a conservative starter — adjust per fleet's
+        # baseline.
+        # ---------------------------------------------------------------
+        - alert: CertctlJobFailureRateHigh
+          expr: >-
+            (
+              rate(certctl_job_failed_total[15m])
+              /
+              clamp_min(rate(certctl_job_failed_total[15m]) + rate(certctl_job_completed_total[15m]), 1)
+            ) > {{ .Values.monitoring.prometheusRules.thresholds.jobFailureRate | default 0.05 }}
+          for: {{ .Values.monitoring.prometheusRules.thresholds.jobFailureRateFor | default "15m" }}
+          labels:
+            severity: warning
+            component: certctl
+          annotations:
+            summary: "certctl: job failure rate above 5% over 15m"
+            description: >-
+              The 15m rate of certctl_job_failed_total / total jobs
+              has been above 5% for 15+ minutes. Open
+              /api/v1/jobs?status=failed to see the failing job IDs
+              and root-cause the recurring error class.
+
+        # ---------------------------------------------------------------
+        # Alert: CertctlIssuanceFailures
+        # Series: certctl_issuance_failures_total
+        # Any non-zero rate of issuance failures over a 15m window is
+        # operationally significant — a single CA outage or expired
+        # ACME account can cascade across the fleet.
+        # ---------------------------------------------------------------
+        - alert: CertctlIssuanceFailures
+          expr: rate(certctl_issuance_failures_total[15m]) > {{ .Values.monitoring.prometheusRules.thresholds.issuanceFailureRate | default 0 }}
+          for: {{ .Values.monitoring.prometheusRules.thresholds.issuanceFailureFor | default "15m" }}
+          labels:
+            severity: warning
+            component: certctl
+          annotations:
+            summary: "certctl: certificate issuance / renewal failures over 15m"
+            description: >-
+              certctl_issuance_failures_total has been incrementing
+              over the last 15 minutes. Check the per-issuer breakdown
+              via /api/v1/issuers + the failed-job log in
+              /api/v1/jobs?status=failed. Common causes: CA
+              outage, ACME account rate-limit, EAB credential
+              expiration, stepca provisioner key rotation without
+              certctl-side update.
+{{- end }}

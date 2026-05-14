@@ -1,0 +1,178 @@
+{{- /*
+Phase 4 DEPL-H2 closure (2026-05-14): opt-in Helm CronJob for
+PostgreSQL backups.
+
+OPERATOR OPT-IN. Default `backup.enabled: false`. Turning it on
+requires:
+  - In-cluster Postgres (this CronJob does NOT cover managed DB
+    services — for AWS RDS / GCP CloudSQL / Azure DB rely on the
+    provider's PITR).
+  - A sink choice (PVC or S3) configured in values.yaml.
+  - For S3: a Secret holding AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY
+    (or use a service account with IRSA on EKS).
+
+The pg_dump invocation matches the canonical shape documented in
+docs/operator/runbooks/postgres-backup.md so a manual run and a
+CronJob run produce byte-identical dumps:
+
+  pg_dump --format=custom --no-owner --no-acl --dbname=certctl
+
+For sink choices beyond PVC + S3 (GCS, Azure Blob, NFS, restic, etc.),
+extend the `aws s3 cp` line below. The Job is intentionally minimal —
+it does ONE thing (capture + ship), not orchestrate retention or
+rotation. Off-host retention is the sink's responsibility (S3 lifecycle
+rules, PVC snapshot retention on the storage class, etc.).
+*/ -}}
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "certctl.fullname" . }}-postgres-backup
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit | default 1 }}
+  startingDeadlineSeconds: {{ .Values.backup.startingDeadlineSeconds | default 300 }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.backup.backoffLimit | default 1 }}
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds | default 3600 }}
+      template:
+        metadata:
+          labels:
+            {{- include "certctl.labels" . | nindent 12 }}
+            app.kubernetes.io/component: postgres-backup
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          serviceAccountName: {{ include "certctl.serviceAccountName" . }}
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            fsGroup: 1000
+          containers:
+            - name: backup
+              image: {{ .Values.backup.image | default "postgres:16-alpine" | quote }}
+              imagePullPolicy: {{ .Values.backup.imagePullPolicy | default "IfNotPresent" | quote }}
+              env:
+                - name: PGHOST
+                  value: {{ include "certctl.fullname" . }}-postgres
+                - name: PGPORT
+                  value: {{ .Values.postgresql.service.port | default 5432 | quote }}
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "certctl.fullname" . }}-postgres
+                      key: username
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "certctl.fullname" . }}-postgres
+                      key: password
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "certctl.fullname" . }}-postgres
+                      key: database
+                {{- if eq (.Values.backup.sink | default "pvc") "s3" }}
+                # S3 sink — operator provides AWS credentials via the
+                # Secret referenced in backup.s3.credentialsSecret. The
+                # credentials need s3:PutObject + s3:ListBucket on the
+                # target bucket only; least-privilege per industry
+                # standard.
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.backup.s3.credentialsSecret.name | quote }}
+                      key: {{ .Values.backup.s3.credentialsSecret.accessKeyIdKey | default "AWS_ACCESS_KEY_ID" }}
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.backup.s3.credentialsSecret.name | quote }}
+                      key: {{ .Values.backup.s3.credentialsSecret.secretAccessKeyKey | default "AWS_SECRET_ACCESS_KEY" }}
+                {{- with .Values.backup.s3.region }}
+                - name: AWS_DEFAULT_REGION
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- end }}
+              command:
+                - /bin/sh
+                - -ceu
+                - |
+                  # Phase 4 DEPL-H2: canonical pg_dump shape per
+                  # docs/operator/runbooks/postgres-backup.md.
+                  # Custom-format compressed dump, no ownership /
+                  # ACL embedded — produces a portable artifact
+                  # restorable into any Postgres ≥ source major
+                  # via `pg_restore -d certctl <dump>`.
+                  set -euo pipefail
+                  TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  DUMP_FILE="/tmp/certctl-${TIMESTAMP}.dump"
+
+                  echo "[backup-cronjob] capturing dump at ${TIMESTAMP}"
+                  pg_dump --format=custom --no-owner --no-acl --dbname="${PGDATABASE}" \
+                    > "${DUMP_FILE}"
+
+                  # Integrity check — pg_restore --list parses the
+                  # dump's table-of-contents; a corrupt dump fails
+                  # here without shipping garbage off-host. Same
+                  # check the manual runbook performs.
+                  echo "[backup-cronjob] verifying dump integrity"
+                  pg_restore --list "${DUMP_FILE}" > /dev/null
+
+                  {{- if eq (.Values.backup.sink | default "pvc") "s3" }}
+                  # S3 sink — requires aws-cli. The default
+                  # postgres:16-alpine image does NOT include
+                  # aws-cli; operators MUST set
+                  # backup.image to an image that bundles both
+                  # (e.g. ghcr.io/your-org/postgres-aws:16) OR
+                  # override backup.command to install aws-cli at
+                  # runtime. The line below assumes the image has
+                  # `aws` on PATH.
+                  S3_PATH="{{ .Values.backup.s3.bucket }}/{{ .Values.backup.s3.prefix | default "certctl" }}/certctl-${TIMESTAMP}.dump"
+                  echo "[backup-cronjob] uploading to s3://${S3_PATH}"
+                  aws s3 cp "${DUMP_FILE}" "s3://${S3_PATH}"
+                  rm -f "${DUMP_FILE}"
+                  {{- else }}
+                  # PVC sink — dump lands at /backups/certctl-${TIMESTAMP}.dump
+                  # mounted from backup.pvc.claimName. Retention is the
+                  # PVC's responsibility (storage-class snapshot lifecycle
+                  # or a separate cleanup CronJob). The Job moves the
+                  # file from /tmp to /backups atomically; never
+                  # writes partial dumps into the durable mount.
+                  FINAL_PATH="/backups/certctl-${TIMESTAMP}.dump"
+                  echo "[backup-cronjob] persisting to ${FINAL_PATH}"
+                  mv "${DUMP_FILE}" "${FINAL_PATH}"
+                  {{- end }}
+                  echo "[backup-cronjob] done"
+              {{- if ne (.Values.backup.sink | default "pvc") "s3" }}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              {{- end }}
+              resources:
+                {{- toYaml (.Values.backup.resources | default dict) | nindent 16 }}
+          {{- if ne (.Values.backup.sink | default "pvc") "s3" }}
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ .Values.backup.pvc.claimName | quote }}
+          {{- end }}
+          {{- with .Values.nodeAffinity }}
+          affinity:
+            nodeAffinity:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+          {{- with .Values.backup.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

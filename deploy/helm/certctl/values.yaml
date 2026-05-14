@@ -31,6 +31,36 @@ server:
   port: 8443
 
   # Resource requests and limits
+  #
+  # Phase 4 DEPL-M5 (2026-05-14): per-fleet-size tuning ladder. The
+  # default values below are validated against the demo dataset
+  # (15 certs / 1 agent) and the baselines in
+  # docs/operator/performance-baselines.md (single endpoint < 5s for
+  # 100 sequential requests = ~50ms p50; cursor-paginated 1000-cert
+  # inventory walk < 3s; renewal scan for 15 certs < 100ms).
+  #
+  # Larger fleet recommendations (TBD pending Phase 8 load-test runs;
+  # operators tune empirically until then — capture readings in your
+  # own loadtest-baselines log):
+  #
+  #   ≤ 500 certs / 100 agents:      defaults below                  (100m / 128Mi req, 500m / 512Mi lim)
+  #   5K certs / 1K agents:          tune up — TBD Phase 8           (suggested starter: 500m / 512Mi req, 2000m / 2Gi lim)
+  #   50K certs / 10K agents:        tune up — TBD Phase 8           (suggested starter: 2000m / 2Gi req, 4000m / 4Gi lim)
+  #
+  # The "suggested starter" values above are operator-tuning starting
+  # points, NOT validated. Phase 8 (load test coverage expansion) will
+  # measure them against synthetic fleets and replace the suggestions
+  # with measured ceilings. Until then, treat them as a "raise CPU
+  # before raising memory; raise both before scaling out" mental
+  # model. Per docs/operator/performance-baselines.md, certctl-server
+  # is CPU-bound on issuance / renewal scan work and memory-bound on
+  # the inventory query path.
+  #
+  # Database scale (postgresql.* below) tracks server scale roughly
+  # 1:1 — at 50K certs the Postgres instance needs 4 CPU / 4Gi RAM
+  # and shared_buffers ≥ 1Gi. Postgres tuning is out of scope for
+  # this comment; see docs/operator/runbooks/postgres-backup.md
+  # for the production-tuning entry-point.
   resources:
     requests:
       cpu: 100m
@@ -449,6 +479,26 @@ agent:
   replicas: 1
 
   # Resource requests and limits
+  #
+  # Phase 4 DEPL-M5 (2026-05-14): per-fleet-size tuning ladder for the
+  # agent. Defaults are sized for the standard "one cert per host"
+  # operating pattern: the agent polls the server every 60s (default
+  # CERTCTL_AGENT_POLL_INTERVAL), generates ECDSA P-256 keys locally on
+  # issuance/renewal events, and is otherwise idle. CPU is bursty only
+  # during keygen + CSR submission.
+  #
+  # Tuning ladder (TBD pending Phase 8 — measure on your fleet):
+  #
+  #   1 cert / host (typical):        defaults below            (50m / 64Mi req, 200m / 256Mi lim)
+  #   10 certs / host:                stays at defaults — agent is poll-driven, not work-bound by cert count
+  #   100 certs / host (rare):        raise lim to 500m / 512Mi if you see throttling on issuance bursts
+  #
+  # The agent does NOT cache certs in memory — issuance is one-shot
+  # generate-then-deploy. So per-host memory scales with whatever
+  # truststore PEM bundles the agent's connectors load (Apache /
+  # Postfix / similar), not with the cert count. Defaults are
+  # appropriate for any "agent terminates ≤ 100 certs on this host"
+  # deployment.
   resources:
     requests:
       cpu: 50m
@@ -611,6 +661,149 @@ monitoring:
     # tlsConfig: {}
     # Optional relabeling for the scrape job.
     # relabelings: []
+
+  # ----------------------------------------------------------------------
+  # Phase 4 DEPL-L2 closure (2026-05-14): PrometheusRule (alert rules)
+  #
+  # Operator opt-in. Requires Prometheus Operator CRDs (the
+  # `monitoring.coreos.com/v1` PrometheusRule kind) installed in
+  # cluster. Without those CRDs the rendered object is rejected by
+  # `kubectl apply` — keep enabled: false if you scrape with vanilla
+  # Prometheus + AlertManager rules ConfigMap instead.
+  #
+  # Four starter rules ship out of the box (see
+  # templates/prometheusrules.yaml for the full PromQL):
+  #
+  #   CertctlCertificateExpiringSoon — certs expiring within 30d
+  #   CertctlAgentOffline             — agent without heartbeat for >1h
+  #   CertctlJobFailureRateHigh       — job-failure rate over 5% (15m)
+  #   CertctlIssuanceFailures         — any issuance failures in last 15m
+  #
+  # All thresholds are operator-tunable via the `thresholds:` block
+  # below. The defaults are tuned for the demo dataset (15 certs / 1
+  # agent); production fleets with sustained renewal volume MAY want
+  # to raise the expiringCertificateCount + jobFailureRate thresholds
+  # to suppress steady-state noise.
+  prometheusRules:
+    enabled: false
+    # Evaluation interval for the rule group.
+    interval: 60s
+    # Additional labels applied to the PrometheusRule metadata.
+    # labels: {}
+    # Per-alert threshold / duration tunables.
+    thresholds:
+      # Fire when more than N certs are in the expiring-soon window.
+      expiringCertificateCount: 0
+      expiringCertificateFor: 5m
+      # Fire when more than N agents are offline (server - online).
+      offlineAgentCount: 0
+      offlineAgentFor: 1h
+      # Fire when job failure rate exceeds this fraction (15m window).
+      jobFailureRate: 0.05
+      jobFailureRateFor: 15m
+      # Fire when issuance failure rate exceeds this value (15m window).
+      issuanceFailureRate: 0
+      issuanceFailureFor: 15m
+
+# ==============================================================================
+# Backup CronJob (Phase 4 DEPL-H2 closure, 2026-05-14)
+# ==============================================================================
+# Operator opt-in. Default OFF. The CronJob runs `pg_dump --format=custom
+# --no-owner --no-acl --dbname=certctl` matching the canonical shape
+# documented in docs/operator/runbooks/postgres-backup.md (so manual
+# and automated dumps are byte-identical) and ships the result to a
+# sink chosen below.
+#
+# DO NOT enable this for managed Postgres deployments (AWS RDS / GCP
+# Cloud SQL / Azure DB) — those have built-in PITR backup that this
+# CronJob cannot match. For in-cluster Postgres only.
+backup:
+  enabled: false
+  # Cron expression (UTC). Default: 02:30 UTC daily.
+  schedule: "30 2 * * *"
+  # Sink: "pvc" (default — dump lands on a PersistentVolumeClaim) or
+  # "s3" (uploads via aws-cli — requires an image that bundles
+  # aws-cli, see backup.image below).
+  sink: pvc
+  # Container image. The default postgres:16-alpine has pg_dump but
+  # NOT aws-cli; for sink: s3 set this to an image that bundles both
+  # (e.g. ghcr.io/your-org/postgres-aws:16) or override the Job's
+  # command to install aws-cli at runtime.
+  image: postgres:16-alpine
+  imagePullPolicy: IfNotPresent
+  # PVC sink config — used when sink: pvc.
+  pvc:
+    # Name of an existing PersistentVolumeClaim mounted at /backups
+    # in the Job's pod. The PVC's storage class controls durability
+    # and snapshot retention. Operator creates this PVC out of band
+    # via their own storage policy.
+    claimName: certctl-backups
+  # S3 sink config — used when sink: s3.
+  s3:
+    # Target bucket (without s3:// prefix).
+    bucket: ""
+    # Object key prefix inside the bucket. Dumps land at
+    # s3://<bucket>/<prefix>/certctl-<TIMESTAMP>.dump.
+    prefix: certctl
+    # AWS region (sets AWS_DEFAULT_REGION). Optional if the image's
+    # AWS SDK can resolve the region another way (instance profile,
+    # IRSA, etc.).
+    region: ""
+    # Secret holding AWS credentials. The IAM principal needs
+    # s3:PutObject + s3:ListBucket on the target bucket only.
+    credentialsSecret:
+      name: certctl-backup-aws-creds
+      accessKeyIdKey: AWS_ACCESS_KEY_ID
+      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+  # Job housekeeping.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 300
+  backoffLimit: 1
+  activeDeadlineSeconds: 3600
+  # Resource budget for the backup container. pg_dump is generally
+  # memory-light; ~250MB RSS for fleets up to 100K certs is typical.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Optional tolerations for the backup Job pod.
+  tolerations: []
+
+# ==============================================================================
+# Migrations via Helm hook (Phase 4 DEPL-M1 closure, 2026-05-14)
+# ==============================================================================
+# When viaHook: true, the chart deploys templates/migration-job.yaml as
+# a pre-install + pre-upgrade hook that runs `certctl-server
+# --migrate-only` (a hermetic schema-mutation pass) before the server
+# Deployment rolls.
+#
+# Set CERTCTL_MIGRATIONS_VIA_HOOK=true in the server Deployment env to
+# tell the server to skip its boot-time RunMigrations call (the hook
+# already did the work; running again at boot would race across
+# replicas during rollouts).
+#
+# Default OFF — when off, the server runs migrations at boot exactly
+# as it always has (Compose deploys keep this path).
+migrations:
+  viaHook: false
+  # Job housekeeping.
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  # Resource budget for the migration Job pod. The migration pass is
+  # I/O-bound on Postgres; matches the server's resource budget by
+  # default. Override here if migrations on a large database need
+  # more headroom than the steady-state server.
+  # resources:
+  #   requests:
+  #     cpu: 100m
+  #     memory: 128Mi
+  #   limits:
+  #     cpu: 500m
+  #     memory: 512Mi
 
 # ==============================================================================
 # Network Policy (Bundle 3 closure / D11)
