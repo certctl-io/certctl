@@ -9,8 +9,28 @@ import react from '@vitejs/plugin-react'
 // because the dev cert is self-signed by deploy/test bootstrap and
 // changes per-checkout — production stops validation at the reverse
 // proxy or load balancer, not the Vite dev server.
+// Phase 9 FE-L1 closure: ship the package.json version into the
+// bundle as a build-time constant. ErrorBoundary's copy-trace payload
+// uses this so a copied stack trace tells the operator which release
+// produced the error. Pulled from package.json at config-load time
+// (no runtime cost). Falls back to 'dev' if unreadable.
+function readPkgVersion(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pkg = require('./package.json') as { version?: string };
+    return pkg.version || 'dev';
+  } catch {
+    return 'dev';
+  }
+}
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // Compile-time replace of __APP_VERSION__ in src files. Quoted
+    // so the replaced token becomes a string literal in the bundle.
+    __APP_VERSION__: JSON.stringify(readPkgVersion()),
+  },
   server: {
     port: 5173,
     proxy: {
@@ -20,7 +40,16 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false,
+    // Phase 9 closure (PERF-M2): 'hidden' generates source maps to
+    // disk but does NOT emit a `//# sourceMappingURL=` comment in the
+    // production JS chunks — so they're not loadable via the browser
+    // (no risk of exposing original source to operators in DevTools),
+    // but the operator (or a future Sentry/error-reporting integration)
+    // can still upload them as release artifacts for symbolication of
+    // FE-L1 ErrorBoundary stack traces. Pre-fix the value was `false`
+    // (no maps at all), which means ANY production exception's stack
+    // traces are minified-only — useless for triage.
+    sourcemap: 'hidden',
     // Phase 4 closure (FE-M5 + SCALE-H1): vendor manualChunks. Pre-Phase-4
     // the single index-*.js chunk weighed ~1.07 MB raw / ~281 KB gz because
     // every dependency landed in the same first-load file. Splitting React,

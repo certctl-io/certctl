@@ -1,5 +1,42 @@
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import Skeleton from './Skeleton';
+
+// Phase 9 closure (UX-M8): row-density toggle. Three tiers map to the
+// vertical padding on tbody td elements. Compact wins at 5K-row dense
+// data review; Spacious wins for low-attention scanning; Comfortable
+// is the existing pre-Phase-9 default. Choice persists per-table via
+// the `tableId` prop — keyed at certctl.density.<id> so two tables on
+// one page don't fight each other.
+export type Density = 'compact' | 'comfortable' | 'spacious';
+
+const DENSITY_CELL_CLASS: Record<Density, string> = {
+  compact:     'px-4 py-1.5',
+  comfortable: 'px-4 py-3',
+  spacious:    'px-4 py-4',
+};
+
+const DENSITY_HEADER_CLASS: Record<Density, string> = {
+  compact:     'px-4 py-2',
+  comfortable: 'px-4 py-3',
+  spacious:    'px-4 py-3.5',
+};
+
+function readDensityPref(tableId: string | undefined): Density {
+  if (!tableId || typeof localStorage === 'undefined') return 'comfortable';
+  try {
+    const v = localStorage.getItem(`certctl.density.${tableId}`);
+    if (v === 'compact' || v === 'comfortable' || v === 'spacious') return v;
+  } catch { /* noop */ }
+  return 'comfortable';
+}
+
+function writeDensityPref(tableId: string | undefined, d: Density): void {
+  if (!tableId || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(`certctl.density.${tableId}`, d);
+  } catch { /* noop */ }
+}
 
 interface Column<T> {
   key: string;
@@ -45,9 +82,42 @@ interface DataTableProps<T> {
   selectedKeys?: Set<string>;
   onSelectionChange?: (keys: Set<string>) => void;
   pagination?: PaginationProps;
+  /**
+   * Phase 9 (UX-M8): per-table identifier for the density preference.
+   * Use a stable string like `'certificates-list'` — choice persists
+   * to localStorage at `certctl.density.<tableId>`. When unset, the
+   * density toggle is hidden (the table renders at the default
+   * 'comfortable' density) — opt-in per-page rollout.
+   */
+  tableId?: string;
+  /**
+   * Initial density. Overridden by the persisted preference when
+   * tableId is set. Defaults to 'comfortable' (matches pre-Phase-9
+   * vertical padding exactly so existing pages render identically
+   * until an operator flips the toggle).
+   */
+  density?: Density;
 }
 
-export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, emptyState, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange, pagination }: DataTableProps<T>) {
+export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, emptyState, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange, pagination, tableId, density: densityProp }: DataTableProps<T>) {
+  // Phase 9 (UX-M8): density preference. When tableId is set, read
+  // localStorage at mount; otherwise use the prop default (or
+  // 'comfortable'). Persist writes via setDensity.
+  const [density, setDensityState] = useState<Density>(() =>
+    tableId ? readDensityPref(tableId) : (densityProp ?? 'comfortable'),
+  );
+  useEffect(() => {
+    // If tableId changes (rare but possible if a parent swaps it),
+    // re-read the persisted preference.
+    if (tableId) setDensityState(readDensityPref(tableId));
+  }, [tableId]);
+
+  const setDensity = (d: Density) => {
+    setDensityState(d);
+    writeDensityPref(tableId, d);
+  };
+  const cellCls   = DENSITY_CELL_CLASS[density];
+  const headerCls = DENSITY_HEADER_CLASS[density];
   // Phase 4 closure (UX-M1): swap the centered spinner + "Loading..."
   // text — which paints into a tiny vertical span and then jumps to a
   // full-height table on resolve, the canonical CLS source — for a
@@ -94,11 +164,14 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
 
   return (
     <div className="overflow-x-auto">
+      {tableId && (
+        <DensityToggle current={density} onChange={setDensity} />
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b-2 border-surface-border bg-surface-muted">
             {selectable && (
-              <th scope="col" className="px-3 py-3 w-10">
+              <th scope="col" className={`w-10 ${headerCls}`}>
                 <input
                   type="checkbox"
                   checked={allSelected || false}
@@ -108,7 +181,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
               </th>
             )}
             {columns.map(col => (
-              <th key={col.key} scope="col" className={`px-4 py-3 text-left text-xs font-semibold text-ink-muted uppercase tracking-wider ${col.className || ''}`}>
+              <th key={col.key} scope="col" className={`${headerCls} text-left text-xs font-semibold text-ink-muted uppercase tracking-wider ${col.className || ''}`}>
                 {col.label}
               </th>
             ))}
@@ -125,7 +198,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
                 className={`border-b border-surface-border/50 transition-colors hover:bg-surface-muted ${onRowClick ? 'cursor-pointer' : ''} ${isSelected ? 'bg-brand-50' : ''}`}
               >
                 {selectable && (
-                  <td className="px-3 py-3 w-10">
+                  <td className={`w-10 ${cellCls}`}>
                     <input
                       type="checkbox"
                       checked={isSelected || false}
@@ -136,7 +209,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
                   </td>
                 )}
                 {columns.map(col => (
-                  <td key={col.key} className={`px-4 py-3 text-ink ${col.className || ''}`}>
+                  <td key={col.key} className={`${cellCls} text-ink ${col.className || ''}`}>
                     {col.render(item)}
                   </td>
                 ))}
@@ -148,6 +221,43 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
       {pagination && pagination.total > 0 && (
         <PaginationControls {...pagination} />
       )}
+    </div>
+  );
+}
+
+/**
+ * Phase 9 UX-M8: 3-button row-density toggle. Renders only when the
+ * parent DataTable was given a `tableId` (the opt-in signal that this
+ * page wants the per-table localStorage persistence).
+ */
+function DensityToggle({ current, onChange }: { current: Density; onChange: (d: Density) => void }) {
+  const opts: { value: Density; label: string }[] = [
+    { value: 'compact',     label: 'Compact' },
+    { value: 'comfortable', label: 'Cozy' },
+    { value: 'spacious',    label: 'Spacious' },
+  ];
+  return (
+    <div className="flex justify-end mb-1.5" role="group" aria-label="Row density">
+      <div className="inline-flex rounded-md border border-surface-border bg-surface text-xs overflow-hidden" data-testid="datatable-density-toggle">
+        {opts.map((o, i) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            aria-pressed={current === o.value}
+            data-testid={`datatable-density-${o.value}`}
+            className={
+              `px-2.5 py-1 transition-colors ` +
+              (current === o.value
+                ? 'bg-brand-500 text-white'
+                : 'text-ink-muted hover:text-ink hover:bg-surface-muted') +
+              (i > 0 ? ' border-l border-surface-border' : '')
+            }
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

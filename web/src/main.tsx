@@ -99,6 +99,10 @@ import Toaster from './components/Toaster';
 // keydown binding stays scoped to the React tree (auto-cleanup on
 // HMR + StrictMode).
 import CommandPaletteHost from './components/CommandPaletteHost';
+// Phase 9 closure (FE-M2 operator-decision: desktop-only stance).
+// Renders a top-of-viewport notice when viewport < 1024px; gated
+// by CSS media query in src/index.css, dismissable + persisted.
+import DesktopOnlyBanner from './components/DesktopOnlyBanner';
 import { STALE_TIME, GC_TIME } from './api/queryConstants';
 import './index.css';
 
@@ -139,6 +143,7 @@ function lazyRoute(element: React.ReactNode) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
+      <DesktopOnlyBanner />
       <QueryClientProvider client={queryClient}>
         <Toaster />
         <AuthProvider>

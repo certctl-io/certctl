@@ -139,3 +139,31 @@
     content: "";
   }
 }
+
+/*
+ * Phase 9 closure (FE-M2 — operator decision 2026-05-14): desktop-only.
+ * The audit flagged 29 partial sm:/md:/lg: responsive classes scattered
+ * across a handful of files, suggesting mobile support that isn't
+ * actually shipped. Operator chose path (a): document desktop-only +
+ * add a viewport-narrow banner; the partial responsive classes stay
+ * (no benefit to ripping them out — they don't hurt at desktop widths
+ * and may help if the decision ever reverses).
+ *
+ * Banner triggers at < 1024px (Tailwind `lg` breakpoint — the layout
+ * starts visibly cramping below this). It's a single fixed bar at the
+ * top of the viewport, doesn't block interaction (z-index high, but
+ * pointer-events: none on the rest of the body), and dismisses with a
+ * one-click "Dismiss" affordance that persists to localStorage.
+ *
+ * Operators who explicitly want narrow-viewport access (responsive
+ * design work, mobile demo, screen-recording at portrait orientation)
+ * can dismiss and the banner stays gone for that browser.
+ */
+@media (max-width: 1023px) {
+  .desktop-only-banner {
+    display: flex;
+  }
+}
+.desktop-only-banner {
+  display: none;
+}
