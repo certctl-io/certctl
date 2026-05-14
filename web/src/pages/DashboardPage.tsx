@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
+import { STALE_TIME } from '../api/queryConstants';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -182,16 +183,88 @@ export default function DashboardPage() {
   // even after dismissal. Takes precedence over localStorage dismissal; stripped on close.
   const forceOnboarding = searchParams.get('onboarding') === '1';
 
+  // Phase 2 PERF-H1 closure: visibility-aware polling.
+  // Pre-Phase-2: Dashboard fired 9 useQuery on mount with 8 polling
+  // (1× 10s + 5× 30s + 2× 60s = ~18 background calls/min). When the
+  // browser tab is hidden (operator working in a different tab) the
+  // polling still fires — wasted backend cycles + battery.
+  //
+  // Fix: track document.visibilityState; when hidden, the
+  // refetchInterval gate below returns false (paused). Also bump the
+  // `jobs` poll from 10s → 30s — the live-tile reason (operator
+  // watching a job finish) doesn't need 10s granularity when 30s is
+  // already inside the human-attention window. The CertificateDetail
+  // page is where 10s polling makes sense (the operator is staring
+  // at the specific job they just kicked off).
+  //
+  // Backend-aggregation gap: ['dashboard-summary'] + ['certs-by-status']
+  // + ['certificates', {}] could collapse into a single endpoint
+  // (3 round-trips → 1) — tracked as a separate Phase-3 backend item.
+  const queryClient = useQueryClient();
+  const [tabVisible, setTabVisible] = useState(
+    typeof document !== 'undefined' ? document.visibilityState === 'visible' : true,
+  );
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handler = () => {
+      const visible = document.visibilityState === 'visible';
+      setTabVisible(visible);
+      // When the tab becomes visible after being hidden, immediately
+      // invalidate the dashboard live-tile queries so the operator
+      // sees fresh data instead of waiting for the next poll tick.
+      if (visible) {
+        queryClient.invalidateQueries({ queryKey: ['health'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+        queryClient.invalidateQueries({ queryKey: ['jobs', {}] });
+        queryClient.invalidateQueries({ queryKey: ['certs-by-status'] });
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [queryClient]);
+
+  // refetchInterval returns false (paused) when the tab is hidden;
+  // otherwise the per-query base interval applies.
+  const liveTileGate = (baseMs: number) => (tabVisible ? baseMs : false);
+
   // All hooks must be called unconditionally (React rules of hooks — no hooks after early returns)
-  const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30000 });
-  const { data: summary } = useQuery({ queryKey: ['dashboard-summary'], queryFn: getDashboardSummary, refetchInterval: 30000 });
+  const { data: health } = useQuery({
+    queryKey: ['health'], queryFn: getHealth,
+    refetchInterval: liveTileGate(30_000),
+    refetchOnWindowFocus: true, staleTime: STALE_TIME.REAL_TIME,
+  });
+  const { data: summary } = useQuery({
+    queryKey: ['dashboard-summary'], queryFn: getDashboardSummary,
+    refetchInterval: liveTileGate(30_000),
+    refetchOnWindowFocus: true, staleTime: STALE_TIME.REAL_TIME,
+  });
   const { data: issuersData } = useQuery({ queryKey: ['issuers'], queryFn: () => getIssuers() });
-  const { data: statusCounts } = useQuery({ queryKey: ['certs-by-status'], queryFn: getCertificatesByStatus, refetchInterval: 30000 });
-  const { data: expirationTimeline } = useQuery({ queryKey: ['expiration-timeline'], queryFn: () => getExpirationTimeline(90), refetchInterval: 60000 });
-  const { data: jobTrends } = useQuery({ queryKey: ['job-trends'], queryFn: () => getJobTrends(30), refetchInterval: 30000 });
-  const { data: issuanceRate } = useQuery({ queryKey: ['issuance-rate'], queryFn: () => getIssuanceRate(30), refetchInterval: 60000 });
-  const { data: certs } = useQuery({ queryKey: ['certificates', {}], queryFn: () => getCertificates(), refetchInterval: 30000 });
-  const { data: jobs } = useQuery({ queryKey: ['jobs', {}], queryFn: () => getJobs(), refetchInterval: 10000 });
+  const { data: statusCounts } = useQuery({
+    queryKey: ['certs-by-status'], queryFn: getCertificatesByStatus,
+    refetchInterval: liveTileGate(30_000),
+    refetchOnWindowFocus: true, staleTime: STALE_TIME.REAL_TIME,
+  });
+  const { data: expirationTimeline } = useQuery({
+    queryKey: ['expiration-timeline'], queryFn: () => getExpirationTimeline(90),
+    refetchInterval: liveTileGate(60_000),
+  });
+  const { data: jobTrends } = useQuery({
+    queryKey: ['job-trends'], queryFn: () => getJobTrends(30),
+    refetchInterval: liveTileGate(30_000),
+  });
+  const { data: issuanceRate } = useQuery({
+    queryKey: ['issuance-rate'], queryFn: () => getIssuanceRate(30),
+    refetchInterval: liveTileGate(60_000),
+  });
+  const { data: certs } = useQuery({
+    queryKey: ['certificates', {}], queryFn: () => getCertificates(),
+    refetchInterval: liveTileGate(30_000),
+  });
+  const { data: jobs } = useQuery({
+    queryKey: ['jobs', {}], queryFn: () => getJobs(),
+    refetchInterval: liveTileGate(30_000),     // PERF-H1: 10s → 30s
+    refetchOnWindowFocus: true, staleTime: STALE_TIME.REAL_TIME,
+  });
 
   // Detect first-run ONCE: no user-configured issuers AND no certificates.
   // Auto-seeded env var issuers (source="env") don't count — they exist on every fresh boot.

@@ -15,6 +15,7 @@ import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { STALE_TIME } from '../../api/queryConstants';
 
 // =============================================================================
 // Bundle 1 Phase 10 — RoleDetailPage.
@@ -56,12 +57,12 @@ export default function RoleDetailPage() {
     queryKey: ['auth', 'role', id],
     queryFn: () => authGetRole(id),
     enabled: Boolean(id),
-    staleTime: 30_000,
+    staleTime: STALE_TIME.REAL_TIME,    // operator editing — fresh data
   });
   const permsCatalogue = useQuery<AuthPermission[], Error>({
     queryKey: ['auth', 'permissions'],
     queryFn: authListPermissions,
-    staleTime: 5 * 60_000,
+    staleTime: STALE_TIME.CONSTANT,     // catalogue — effectively immutable
   });
 
   const [editOpen, setEditOpen] = useState(false);

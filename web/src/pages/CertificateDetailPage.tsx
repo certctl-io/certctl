@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getRenewalPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12, getOCSPStatus, fetchCRL, getAdminCRLCache } from '../api/client';
@@ -417,6 +417,7 @@ function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { cer
 export default function CertificateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [showDeploy, setShowDeploy] = useState(false);
   const [deployTargetId, setDeployTargetId] = useState('');
   const [showRevoke, setShowRevoke] = useState(false);
@@ -465,14 +466,32 @@ export default function CertificateDetailPage() {
     },
   });
 
-  const archiveMutation = useTrackedMutation({
+  // Phase 2 TQ-M3 closure: optimistic archive. Flip the cert's status
+  // to 'Archived' in the ['certificate', id] cache snapshot
+  // immediately; on success navigate (the user leaves the page so the
+  // optimistic data doesn't linger). On error, restore the snapshot
+  // + surface the error toast — the user stays on the page with
+  // status reverted.
+  type ArchiveSnapshot = { prev?: { status?: string } | undefined };
+  const archiveMutation = useTrackedMutation<unknown, Error, void, ArchiveSnapshot>({
     mutationFn: () => archiveCertificate(id!),
     invalidates: [['certificates']],
+    onMutate: async (): Promise<ArchiveSnapshot> => {
+      await queryClient.cancelQueries({ queryKey: ['certificate', id] });
+      const prev = queryClient.getQueryData(['certificate', id]) as ArchiveSnapshot['prev'];
+      if (prev) {
+        queryClient.setQueryData(['certificate', id], { ...prev, status: 'Archived' });
+      }
+      return { prev };
+    },
+    onError: (err, _vars, snap) => {
+      if (snap?.prev) queryClient.setQueryData(['certificate', id], snap.prev);
+      toast.error(`Archive failed: ${err.message}`);
+    },
     onSuccess: () => {
       toast.success('Certificate archived');
       navigate('/certificates');
     },
-    onError: (err: Error) => toast.error(`Archive failed: ${err.message}`),
   });
 
   const revokeMutation = useTrackedMutation({

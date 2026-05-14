@@ -10,6 +10,7 @@ import {
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import { STALE_TIME } from '../../api/queryConstants';
 
 // =============================================================================
 // Bundle 1 Phase 9 + Phase 10 — Approvals queue.
@@ -239,7 +240,7 @@ export default function ApprovalsPage() {
   const query = useQuery({
     queryKey: ['approvals', filterState],
     queryFn: () => listApprovals(filterState),
-    staleTime: 15_000,
+    staleTime: STALE_TIME.REAL_TIME,   // approval queue — operator-facing
     refetchInterval: 30_000,
   });
 

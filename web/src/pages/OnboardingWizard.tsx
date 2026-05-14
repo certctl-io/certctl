@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
+import { STALE_TIME } from '../api/queryConstants';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   getIssuers, getAgents, getProfiles, getOwners, getTeams, getRenewalPolicies,
@@ -284,11 +285,20 @@ function AgentStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void 
   const apiKey = getApiKey() || '<your-api-key>';
   const serverUrl = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8443` : 'http://localhost:8443';
 
-  // Poll for agents every 5s
+  // Phase 2 TQ-H1 closure: poll every 5s ONLY until the first agent
+  // registers, then stop. v5 functional refetchInterval returns false
+  // (or 0) to disable. Pre-fix this polled forever; once the wizard
+  // succeeded the next user landed in a state with a 5-second cadence
+  // hitting /api/v1/agents indefinitely until they reloaded the tab.
+  // Now: as soon as agents.length > 0, the interval flips to false
+  // and the poll stops.
   const { data: agents } = useQuery({
     queryKey: ['agents'],
     queryFn: () => getAgents(),
-    refetchInterval: 5000,
+    refetchInterval: (query) =>
+      (query.state.data?.data?.length ?? 0) > 0 ? false : 5_000,
+    refetchOnWindowFocus: true,
+    staleTime: STALE_TIME.REAL_TIME,
   });
 
   const agentList = agents?.data || [];

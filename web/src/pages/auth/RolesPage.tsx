@@ -5,6 +5,7 @@ import { authListRoles, authCreateRole, type AuthRole } from '../../api/client';
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import { STALE_TIME } from '../../api/queryConstants';
 
 // =============================================================================
 // Bundle 1 Phase 10 — RolesPage.
@@ -139,7 +140,7 @@ export default function RolesPage() {
   const rolesQuery = useQuery<AuthRole[], Error>({
     queryKey: ['auth', 'roles'],
     queryFn: authListRoles,
-    staleTime: 30_000,
+    staleTime: STALE_TIME.REFERENCE,   // role catalogue — slow-changing
   });
 
   const [createOpen, setCreateOpen] = useState(false);

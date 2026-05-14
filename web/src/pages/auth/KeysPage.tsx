@@ -13,6 +13,7 @@ import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { STALE_TIME } from '../../api/queryConstants';
 
 // =============================================================================
 // Bundle 1 Phase 10 — KeysPage.
@@ -35,12 +36,12 @@ export default function KeysPage() {
   const keysQuery = useQuery<AuthKeyEntry[], Error>({
     queryKey: ['auth', 'keys'],
     queryFn: authListKeys,
-    staleTime: 30_000,
+    staleTime: STALE_TIME.REAL_TIME,   // operator-facing live data
   });
   const rolesQuery = useQuery<AuthRole[], Error>({
     queryKey: ['auth', 'roles'],
     queryFn: authListRoles,
-    staleTime: 60_000,
+    staleTime: STALE_TIME.REFERENCE,   // role catalogue, slow-changing
   });
 
   const [assignTarget, setAssignTarget] = useState<AuthKeyEntry | null>(null);

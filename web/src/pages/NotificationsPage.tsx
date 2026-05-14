@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getNotifications, markNotificationRead, requeueNotification } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -7,6 +8,14 @@ import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
 import { timeAgo } from '../api/utils';
 import type { Notification } from '../api/types';
+
+// Phase 2 TQ-M3 closure: optimistic-update context shape. onMutate
+// snapshots the current ['notifications', tab] cache; onError uses
+// it to roll back. onSettled fires the invalidation regardless.
+interface NotifSnapshot {
+  prevAll?:  { data: Notification[]; total: number } | undefined;
+  prevDead?: { data: Notification[]; total: number } | undefined;
+}
 
 type ViewMode = 'list' | 'grouped';
 
@@ -43,9 +52,37 @@ export default function NotificationsPage() {
     refetchInterval: 30000,
   });
 
-  const markRead = useTrackedMutation({
+  // Phase 2 TQ-M3 closure: mark-notification-read with optimistic
+  // update. Flip the row's status to 'read' in the cache immediately;
+  // on error, restore the snapshot + show the toast. The success
+  // toast is omitted (the visual flip from unread → read is its own
+  // feedback); errors get a toast because they re-render the row
+  // back to unread and the operator needs to know why.
+  const queryClient = useQueryClient();
+  const markRead = useTrackedMutation<unknown, Error, string, NotifSnapshot>({
     mutationFn: markNotificationRead,
     invalidates: [['notifications']],
+    onMutate: async (id: string): Promise<NotifSnapshot> => {
+      // Cancel any in-flight refetch so optimistic data doesn't get
+      // overwritten by a stale response landing during the mutation.
+      await queryClient.cancelQueries({ queryKey: ['notifications'] });
+      const snapshot: NotifSnapshot = {
+        prevAll:  queryClient.getQueryData(['notifications', 'all'])  as NotifSnapshot['prevAll'],
+        prevDead: queryClient.getQueryData(['notifications', 'dead']) as NotifSnapshot['prevDead'],
+      };
+      const flipStatus = (page?: { data: Notification[]; total: number }) =>
+        page
+          ? { ...page, data: page.data.map((n) => (n.id === id ? { ...n, status: 'read' as const } : n)) }
+          : page;
+      queryClient.setQueryData(['notifications', 'all'],  flipStatus(snapshot.prevAll));
+      queryClient.setQueryData(['notifications', 'dead'], flipStatus(snapshot.prevDead));
+      return snapshot;
+    },
+    onError: (err, _id, snapshot) => {
+      if (snapshot?.prevAll)  queryClient.setQueryData(['notifications', 'all'],  snapshot.prevAll);
+      if (snapshot?.prevDead) queryClient.setQueryData(['notifications', 'dead'], snapshot.prevDead);
+      toast.error(`Mark-read failed: ${err.message}`);
+    },
   });
 
   // I-005: requeue a dead notification. Invalidates both tab cache entries

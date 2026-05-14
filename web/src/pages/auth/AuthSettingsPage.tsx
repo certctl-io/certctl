@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { authBootstrapAvailable, authRuntimeConfig } from '../../api/client';
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
+import { STALE_TIME } from '../../api/queryConstants';
 
 // =============================================================================
 // Bundle 1 Phase 10 — AuthSettingsPage (stub).
@@ -24,7 +25,7 @@ export default function AuthSettingsPage() {
   const bootstrapQuery = useQuery({
     queryKey: ['auth', 'bootstrap', 'available'],
     queryFn: authBootstrapAvailable,
-    staleTime: 60_000,
+    staleTime: STALE_TIME.REFERENCE,   // slow-changing auth-runtime data
     retry: 0,
   });
   // Audit 2026-05-10 MED-12 — Auth runtime config panel. Gated
@@ -33,7 +34,7 @@ export default function AuthSettingsPage() {
   const runtimeQuery = useQuery({
     queryKey: ['auth', 'runtime-config'],
     queryFn: authRuntimeConfig,
-    staleTime: 60_000,
+    staleTime: STALE_TIME.REFERENCE,   // slow-changing auth-runtime data
     retry: 0,
   });
 

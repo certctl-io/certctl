@@ -62,14 +62,31 @@ import UsersPage from './pages/auth/UsersPage';
 // the root so any component can `import { toast } from "sonner"` and
 // call toast.success / toast.error without provider plumbing.
 import Toaster from './components/Toaster';
+import { STALE_TIME, GC_TIME } from './api/queryConstants';
 import './index.css';
 
+// Phase 2 closure (TQ-H2 + TQ-M1): QueryClient defaults rewritten.
+// Pre-Phase-2: staleTime 10s + refetchOnWindowFocus true caused a
+// refetch storm on every tab refocus across 242 query sites and a
+// 10s "freshness" window meaning every cross-page navigation
+// triggered backend hits.
+//
+// Post-Phase-2: 5min REFERENCE staleTime is the dominant-case sane
+// default; queries that legitimately need live data (jobs, in-flight
+// scans, agent heartbeats — the live-tile cohort) opt in PER-QUERY to
+// staleTime: STALE_TIME.REAL_TIME + refetchOnWindowFocus: true. gcTime
+// is now explicit at STANDARD (5min) so the contract is documented at
+// the root rather than implicit-defaulted by TanStack.
+//
+// retry: 1 stays — lowering to 0 surfaces network blips; raising to
+// the TanStack default of 3 hammers the backend on transient 503s.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 10_000,
-      retry: 1,
-      refetchOnWindowFocus: true,
+      staleTime: STALE_TIME.REFERENCE,    // 5 min — see api/queryConstants.ts
+      gcTime:    GC_TIME.STANDARD,        // 5 min — explicit; was TanStack-default
+      retry:     1,
+      refetchOnWindowFocus: false,        // per-query opt-in for live-tile queries
     },
   },
 });

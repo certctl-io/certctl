@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import {
   getDiscoveredCertificates,
@@ -138,18 +139,60 @@ export default function DiscoveryPage() {
     queryFn: () => getAgents({ per_page: '200' }),
   });
 
-  const claimMutation = useTrackedMutation({
-    mutationFn: ({ id, managedCertId }: { id: string; managedCertId: string }) =>
+  // Phase 2 TQ-M3 closure: claim + dismiss with optimistic updates.
+  // Each one flips the row's status in the ['discovered-certificates']
+  // cache immediately so the visual response is sub-100ms regardless
+  // of network RTT. Rollback restores the snapshot + fires a Sonner
+  // error toast.
+  const queryClient = useQueryClient();
+  type DiscSnapshot = {
+    prev?: { data: DiscoveredCertificate[]; total: number } | undefined;
+  };
+
+  const claimMutation = useTrackedMutation<unknown, Error, { id: string; managedCertId: string }, DiscSnapshot>({
+    mutationFn: ({ id, managedCertId }) =>
       claimDiscoveredCertificate(id, managedCertId),
     invalidates: [['discovered-certificates'], ['discovery-summary']],
+    onMutate: async ({ id }): Promise<DiscSnapshot> => {
+      await queryClient.cancelQueries({ queryKey: ['discovered-certificates'] });
+      const prev = queryClient.getQueryData(['discovered-certificates']) as DiscSnapshot['prev'];
+      if (prev) {
+        queryClient.setQueryData(['discovered-certificates'], {
+          ...prev,
+          data: prev.data.map((c) => (c.id === id ? { ...c, status: 'Managed' as const } : c)),
+        });
+      }
+      return { prev };
+    },
+    onError: (err, _vars, snap) => {
+      if (snap?.prev) queryClient.setQueryData(['discovered-certificates'], snap.prev);
+      toast.error(`Claim failed: ${err.message}`);
+    },
     onSuccess: () => {
+      toast.success('Certificate claimed');
       setClaimingCert(null);
     },
   });
 
-  const dismissMutation = useTrackedMutation({
+  const dismissMutation = useTrackedMutation<unknown, Error, string, DiscSnapshot>({
     mutationFn: dismissDiscoveredCertificate,
     invalidates: [['discovered-certificates'], ['discovery-summary']],
+    onMutate: async (id): Promise<DiscSnapshot> => {
+      await queryClient.cancelQueries({ queryKey: ['discovered-certificates'] });
+      const prev = queryClient.getQueryData(['discovered-certificates']) as DiscSnapshot['prev'];
+      if (prev) {
+        queryClient.setQueryData(['discovered-certificates'], {
+          ...prev,
+          data: prev.data.map((c) => (c.id === id ? { ...c, status: 'Dismissed' as const } : c)),
+        });
+      }
+      return { prev };
+    },
+    onError: (err, _id, snap) => {
+      if (snap?.prev) queryClient.setQueryData(['discovered-certificates'], snap.prev);
+      toast.error(`Dismiss failed: ${err.message}`);
+    },
+    onSuccess: () => toast.success('Discovery dismissed'),
   });
 
   const formatExpiry = (notAfter?: string) => {

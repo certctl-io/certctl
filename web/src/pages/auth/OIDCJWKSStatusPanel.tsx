@@ -5,6 +5,7 @@ import {
   refreshOIDCProvider,
   type JWKSStatusSnapshot,
 } from '../../api/client';
+import { STALE_TIME } from '../../api/queryConstants';
 
 // =============================================================================
 // Audit 2026-05-11 Fix 10 — JWKS health panel (MED-7 GUI half).
@@ -69,7 +70,7 @@ export default function OIDCJWKSStatusPanel({ providerID, canRefresh = true }: P
     queryKey: ['auth', 'oidc', 'jwks-status', providerID],
     queryFn: () => authOIDCJWKSStatus(providerID),
     // 30s freshness — operators rarely poll faster than this.
-    staleTime: 30_000,
+    staleTime: STALE_TIME.REAL_TIME,   // operator troubleshooting key rotation
     // 403 / 404 / 500 — don't drown the page in retries. The panel
     // hides itself on error (see below).
     retry: 0,

@@ -32,25 +32,35 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
   });
   const [error, setError] = useState('');
 
+  // Phase 2 P-H1 closure: pre-Phase-2 there were 4 duplicate-key pairs
+  // between this modal and the parent CertificatesPage filter bar:
+  //   ['profiles']        vs ['profiles-filter']
+  //   ['issuers']         vs ['issuers-filter']
+  //   ['owners', 'form']  vs ['owners-filter']
+  //   ['teams', 'form']   vs ['teams-filter']
+  // TanStack v5 dedupes on serialized queryKey, so the same call shape
+  // shared between modal + filter now hits the cache exactly once.
+  // Both sites now request per_page=100 (was 500/none here, 100 there
+  // — the modal's "500 entries" was over-fetching for a dropdown).
   const { data: profilesResp } = useQuery({
-    queryKey: ['profiles'],
-    queryFn: () => getProfiles(),
+    queryKey: ['profiles', { per_page: 100 }],
+    queryFn: () => getProfiles({ per_page: '100' }),
   });
   const { data: issuersResp } = useQuery({
-    queryKey: ['issuers'],
-    queryFn: () => getIssuers(),
+    queryKey: ['issuers', { per_page: 100 }],
+    queryFn: () => getIssuers({ per_page: '100' }),
   });
   // C-001: owner_id, team_id, and renewal_policy_id are required by the
   // server (handler in internal/api/handler/certificates.go) and by OpenAPI.
   // Load the catalog so the user selects valid FKs instead of typing free-text
   // IDs that would 400 at the server.
   const { data: ownersResp } = useQuery({
-    queryKey: ['owners', 'form'],
-    queryFn: () => getOwners({ per_page: '500' }),
+    queryKey: ['owners', { per_page: 100 }],
+    queryFn: () => getOwners({ per_page: '100' }),
   });
   const { data: teamsResp } = useQuery({
-    queryKey: ['teams', 'form'],
-    queryFn: () => getTeams({ per_page: '500' }),
+    queryKey: ['teams', { per_page: 100 }],
+    queryFn: () => getTeams({ per_page: '100' }),
   });
   // G-1: swap from getPolicies (compliance rules, pol-*) to getRenewalPolicies
   // (lifecycle policies, rp-*). managed_certificates.renewal_policy_id FK
@@ -469,11 +479,28 @@ export default function CertificatesPage() {
   const [showBulkReassign, setShowBulkReassign] = useState(false);
   const [bulkRenewProgress, setBulkRenewProgress] = useState<{ done: number; total: number; running: boolean } | null>(null);
 
-  const { data: issuersData } = useQuery({ queryKey: ['issuers-filter'], queryFn: () => getIssuers({ per_page: '100' }) });
-  const { data: ownersData } = useQuery({ queryKey: ['owners-filter'], queryFn: () => getOwners({ per_page: '100' }) });
-  const { data: profilesData } = useQuery({ queryKey: ['profiles-filter'], queryFn: () => getProfiles({ per_page: '100' }) });
+  // Phase 2 P-H1 closure: queryKey now matches CreateCertificateModal's
+  // upstream calls byte-for-byte (`[name, { per_page: 100 }]`). TanStack
+  // v5 serializes the key on insert + comparison; identical serialization
+  // means the modal + filter share one cache slot. Pre-Phase-2 these
+  // were 4 independent fetches that returned the same data.
+  const { data: issuersData } = useQuery({
+    queryKey: ['issuers', { per_page: 100 }],
+    queryFn: () => getIssuers({ per_page: '100' }),
+  });
+  const { data: ownersData } = useQuery({
+    queryKey: ['owners', { per_page: 100 }],
+    queryFn: () => getOwners({ per_page: '100' }),
+  });
+  const { data: profilesData } = useQuery({
+    queryKey: ['profiles', { per_page: 100 }],
+    queryFn: () => getProfiles({ per_page: '100' }),
+  });
   // F-1 closure: hydrate the team filter dropdown.
-  const { data: teamsFilterData } = useQuery({ queryKey: ['teams-filter'], queryFn: () => getTeams({ per_page: '100' }) });
+  const { data: teamsFilterData } = useQuery({
+    queryKey: ['teams', { per_page: 100 }],
+    queryFn: () => getTeams({ per_page: '100' }),
+  });
 
   const params: Record<string, string> = {};
   if (statusFilter)  params.status         = statusFilter;

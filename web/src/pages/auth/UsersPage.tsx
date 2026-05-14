@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { authListUsers, authDeactivateUser, authReactivateUser, type AuthUser } from '../../api/client';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import { STALE_TIME } from '../../api/queryConstants';
 
 // =============================================================================
 // Audit 2026-05-10 MED-11 closure — Federated-user admin GUI.
@@ -26,7 +27,7 @@ export default function UsersPage() {
   const usersQuery = useQuery<AuthUser[], Error>({
     queryKey: ['auth', 'users', providerFilter],
     queryFn: () => authListUsers(providerFilter || undefined),
-    staleTime: 30_000,
+    staleTime: STALE_TIME.REAL_TIME,   // operator-facing user list
   });
 
   async function deactivate(u: AuthUser) {
