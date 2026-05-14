@@ -258,7 +258,15 @@ func (r *etagRecorder) writeHeadersToWire() {
 	// handlers (they all set Content-Type) and a safe guard against
 	// a future handler bug that would otherwise let the browser
 	// content-sniff a JSON body as text/html.
-	hdr := r.ResponseWriter.Header()
+	//
+	// Drop the embedded-field selector for Header() — etagRecorder
+	// doesn't override Header(), so r.Header() resolves to the
+	// embedded ResponseWriter.Header() (staticcheck QF1008). The
+	// neighboring r.ResponseWriter.WriteHeader / r.ResponseWriter.Write
+	// calls intentionally KEEP the explicit selector because
+	// etagRecorder.Write / etagRecorder.WriteHeader override them
+	// and the embedded form is required to bypass recursion.
+	hdr := r.Header()
 	if hdr.Get("Content-Type") == "" {
 		hdr.Set("Content-Type", "application/json; charset=utf-8")
 	}
