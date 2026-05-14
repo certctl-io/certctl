@@ -82,16 +82,30 @@ ARG LIBEST_REF
 # is the same major version libest r3.2.0 was tested against. libest
 # also wants libcurl + libsafec; we install both via apt rather than
 # building from source for reproducibility.
-RUN apt-get update && apt-get install --no-install-recommends -y \
-        autoconf \
-        automake \
-        build-essential \
-        ca-certificates \
-        git \
-        libcurl4-openssl-dev \
-        libssl-dev \
-        libtool \
-        pkg-config \
+#
+# Hotfix #18 (2026-05-14): wrap in a 3-retry loop with --fix-missing
+# fallback to absorb transient Debian mirror flakes. The original
+# unwrapped apt-get install failed CI run #N on a "Connection reset
+# by peer" mid-fetch of libssh2-1 from fastly's debian.org mirror at
+# 151.101.202.132. Mirrors flake; production-grade Dockerfiles wrap
+# network ops in retry. Same pattern as the main Dockerfile's npm-ci
+# 3-retry loop from Hotfix #9.
+RUN for i in 1 2 3; do \
+        apt-get update && \
+        apt-get install --no-install-recommends -y --fix-missing \
+            autoconf \
+            automake \
+            build-essential \
+            ca-certificates \
+            git \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libtool \
+            pkg-config \
+        && break; \
+        echo "apt-get install attempt $i/3 failed; sleeping 5s before retry"; \
+        sleep 5; \
+    done \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -172,13 +186,22 @@ RUN git clone --depth 1 --branch ${LIBEST_REF} https://github.com/cisco/libest.g
 # Pinned to the same digest as the builder above (Bundle A / H-001).
 FROM debian:bullseye-slim@sha256:1a4701c321b1d28b1ff5f0230e766791e4b79b1d4c6c7a70064f4b297b1a330f
 
-RUN apt-get update && apt-get install --no-install-recommends -y \
-        bash \
-        ca-certificates \
-        curl \
-        libcurl4 \
-        libssl1.1 \
-        openssl \
+# Hotfix #18 (2026-05-14): same 3-retry pattern as the builder stage
+# above. Runtime image installs are also vulnerable to transient
+# mirror flakes.
+RUN for i in 1 2 3; do \
+        apt-get update && \
+        apt-get install --no-install-recommends -y --fix-missing \
+            bash \
+            ca-certificates \
+            curl \
+            libcurl4 \
+            libssl1.1 \
+            openssl \
+        && break; \
+        echo "apt-get install attempt $i/3 failed; sleeping 5s before retry"; \
+        sleep 5; \
+    done \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 estuser
 
