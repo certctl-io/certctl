@@ -217,6 +217,19 @@ jobs:
       base64-subjects: "${{ needs.aggregate-checksums.outputs.hashes }}"
       upload-assets: true
       provenance-name: multiple.intoto.jsonl
+      # Phase 1 RED-2 compat (2026-05-14): the SLSA reusable workflow's
+      # default path downloads a pre-built generator binary from a
+      # GitHub *release* of slsa-framework/slsa-github-generator —
+      # releases are keyed by tag name (vX.Y.Z), and the workflow
+      # rejects SHA-form refs with "Expected ref of the form
+      # refs/tags/vX.Y.Z". Phase 1 RED-2 SHA-pinned every Actions
+      # uses: line, so the default path errors out. Setting
+      # compile-generator: true instead builds the generator from the
+      # pinned-SHA source inside the workflow run — preserves
+      # supply-chain integrity (SHA pin retained), adds ~1 min build
+      # time. This is the SLSA project's documented escape hatch for
+      # SHA-pinned reusable-workflow consumers.
+      compile-generator: true
 
   # ----------------------------------------------------------------------
   # build-and-push-docker: push container images to GHCR with native
