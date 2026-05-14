@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getRenewalPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12, getOCSPStatus, fetchCRL, getAdminCRLCache } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useAuth } from '../components/AuthProvider';
 import { formatDate, formatDateTime, daysUntil, expiryColor, timeAgo } from '../api/utils';
 import type { Job, CRLCacheRow } from '../api/types';
@@ -422,6 +424,7 @@ export default function CertificateDetailPage() {
   const [showExport, setShowExport] = useState(false);
   const [pkcs12Password, setPkcs12Password] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   const { data: cert, isLoading, error, refetch } = useQuery({
     queryKey: ['certificate', id],
@@ -466,8 +469,10 @@ export default function CertificateDetailPage() {
     mutationFn: () => archiveCertificate(id!),
     invalidates: [['certificates']],
     onSuccess: () => {
+      toast.success('Certificate archived');
       navigate('/certificates');
     },
+    onError: (err: Error) => toast.error(`Archive failed: ${err.message}`),
   });
 
   const revokeMutation = useTrackedMutation({
@@ -490,7 +495,7 @@ export default function CertificateDetailPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert(`Export failed: ${err instanceof Error ? err.message : err}`);
+      toast.error(`Export failed: ${err instanceof Error ? err.message : err}`);
     } finally {
       setExporting(false);
     }
@@ -509,7 +514,7 @@ export default function CertificateDetailPage() {
       setShowExport(false);
       setPkcs12Password('');
     } catch (err) {
-      alert(`Export failed: ${err instanceof Error ? err.message : err}`);
+      toast.error(`Export failed: ${err instanceof Error ? err.message : err}`);
     } finally {
       setExporting(false);
     }
@@ -600,7 +605,7 @@ export default function CertificateDetailPage() {
             )}
             {!isArchived && (
               <button
-                onClick={() => { if (confirm('Archive this certificate? This cannot be undone.')) archiveMutation.mutate(); }}
+                onClick={() => setConfirmArchive(true)}
                 disabled={archiveMutation.isPending}
                 className="btn btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
               >
@@ -931,6 +936,23 @@ export default function CertificateDetailPage() {
           </div>
         </div>
       )}
+      {/* UX-H2 / UX-H3 closure — archive is the most-irreversible
+          single-cert action. Gate behind a typed-confirmation prompt
+          so the operator cannot fat-finger through the dialog. */}
+      <ConfirmDialog
+        open={confirmArchive}
+        title="Archive this certificate"
+        message={`This action cannot be undone. The certificate (${cert?.common_name || id}) will be moved to the archive bucket and removed from the active inventory. Active deployments + renewal policies referencing it will be skipped.`}
+        confirmLabel="Archive"
+        cancelLabel="Cancel"
+        destructive
+        typedConfirmation="archive"
+        onConfirm={() => {
+          archiveMutation.mutate();
+          setConfirmArchive(false);
+        }}
+        onCancel={() => setConfirmArchive(false)}
+      />
     </>
   );
 }

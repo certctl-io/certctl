@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 interface Column<T> {
   key: string;
   label: string;
@@ -28,6 +30,14 @@ interface DataTableProps<T> {
   data: T[];
   onRowClick?: (item: T) => void;
   emptyMessage?: string;
+  /**
+   * UX-M3 / Phase 1: rich empty-state slot. Pass an <EmptyState />
+   * component (or any ReactNode) here when the page wants a CTA-driven
+   * first-run experience instead of the bare emptyMessage string. The
+   * existing `emptyMessage` prop is preserved for backward compat with
+   * the ~18 list-page call sites that pass a simple string.
+   */
+  emptyState?: ReactNode;
   isLoading?: boolean;
   keyField?: string;
   selectable?: boolean;
@@ -36,7 +46,7 @@ interface DataTableProps<T> {
   pagination?: PaginationProps;
 }
 
-export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange, pagination }: DataTableProps<T>) {
+export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, emptyState, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange, pagination }: DataTableProps<T>) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16 text-ink-muted">
@@ -50,6 +60,12 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
   }
 
   if (!data.length) {
+    // UX-M3 / Phase 1: prefer the rich <EmptyState /> slot when supplied;
+    // fall back to the legacy string render so existing call sites with
+    // emptyMessage="…" stay unchanged.
+    if (emptyState) {
+      return <>{emptyState}</>;
+    }
     return (
       <div className="flex items-center justify-center py-16 text-ink-faint">
         {emptyMessage || 'No data found'}

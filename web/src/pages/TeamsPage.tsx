@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getTeams, deleteTeam, createTeam, updateTeam } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -156,7 +157,8 @@ export default function TeamsPage() {
   const deleteMutation = useTrackedMutation({
     mutationFn: deleteTeam,
     invalidates: [['teams']],
-    onError: (err: Error) => alert(`Delete failed: ${err.message}`),
+    onSuccess: () => toast.success('Team deleted'),
+    onError: (err: Error) => toast.error(`Delete failed: ${err.message}`),
   });
 
   const createMutation = useTrackedMutation({

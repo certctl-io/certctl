@@ -58,6 +58,10 @@ import SessionsPage from './pages/auth/SessionsPage';
 import BreakglassPage from './pages/auth/BreakglassPage';
 // Audit 2026-05-10 MED-11 closure — federated-user admin page.
 import UsersPage from './pages/auth/UsersPage';
+// Phase 1 closure (UX-H3): toast / snackbar system. Mounted once near
+// the root so any component can `import { toast } from "sonner"` and
+// call toast.success / toast.error without provider plumbing.
+import Toaster from './components/Toaster';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -74,6 +78,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
+        <Toaster />
         <AuthProvider>
           <AuthGate>
             <BrowserRouter>

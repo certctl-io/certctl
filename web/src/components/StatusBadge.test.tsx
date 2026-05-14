@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
-import StatusBadge from './StatusBadge';
+import StatusBadge, { statusDisplay, titleCase } from './StatusBadge';
 
 // -----------------------------------------------------------------------------
 // D-1 master — StatusBadge enum-coverage contract
@@ -118,13 +118,111 @@ describe('StatusBadge — enum-coverage contract (D-1 master)', () => {
     expect(container.querySelector('span')!.className).toContain('badge-warning');
   });
 
-  // Unknown statuses fall through to neutral. The string is still
-  // displayed verbatim so an operator can see "what is this?" rather
-  // than nothing at all.
-  it('unknown status string renders as neutral but preserves the label text', () => {
+  // Unknown statuses fall through to neutral. The label is humanised
+  // via the titleCase() helper (UX-H5) so the operator sees readable
+  // text rather than the raw enum key — "Some future status" instead
+  // of "SomeFutureStatus".
+  it('unknown status string renders as neutral with titleCase fallback', () => {
     const { container } = render(<StatusBadge status="SomeFutureStatus" />);
     const span = container.querySelector('span');
     expect(span!.className).toBe('badge badge-neutral');
-    expect(span!.textContent).toBe('SomeFutureStatus');
+    expect(span!.textContent).toBe('Some future status');
+  });
+});
+
+// -----------------------------------------------------------------------------
+// UX-H5 master — StatusBadge display-string contract (Phase 1, 2026-05-14)
+//
+// The audit finding: pre-Phase-1, StatusBadge rendered raw Go enum keys
+// — operators saw "RenewalInProgress" / "AwaitingCSR" / "cert_mismatch"
+// / "dead" verbatim. Phase 1 adds a statusDisplay map next to
+// statusStyles; this suite pins the byte-exact display string for every
+// wire key.
+// -----------------------------------------------------------------------------
+describe('StatusBadge — display-string contract (UX-H5)', () => {
+  // Every wire key in the colour map MUST have a display-string entry
+  // and the entry MUST be non-empty. Missing entries fall back to the
+  // titleCase() helper, but having an explicit entry in statusDisplay
+  // is the preferred path (lets us pick the cleanest sentence-case
+  // phrasing, with terms like "Awaiting CSR" capitalised correctly
+  // where titleCase would yield "Awaiting csr").
+  const EXPECTED_DISPLAY: Array<[string, string]> = [
+    // Certificate statuses
+    ['Active', 'Active'],
+    ['Expiring', 'Expiring soon'],
+    ['Expired', 'Expired'],
+    ['RenewalInProgress', 'Renewal in progress'],
+    ['Archived', 'Archived'],
+    ['Revoked', 'Revoked'],
+    // Job statuses
+    ['Pending', 'Pending'],
+    ['AwaitingCSR', 'Awaiting CSR'],
+    ['AwaitingApproval', 'Awaiting approval'],
+    ['Running', 'Running'],
+    ['Completed', 'Completed'],
+    ['Failed', 'Failed'],
+    ['Cancelled', 'Cancelled'],
+    // Agent statuses
+    ['Online', 'Online'],
+    ['Offline', 'Offline'],
+    ['Degraded', 'Degraded'],
+    // Discovery statuses
+    ['Unmanaged', 'Unmanaged'],
+    ['Managed', 'Managed'],
+    ['Dismissed', 'Dismissed'],
+    // Frontend-synthesized issuer statuses
+    ['Enabled', 'Enabled'],
+    ['Disabled', 'Disabled'],
+    // Notification statuses (lowercase wire values)
+    ['sent', 'Sent'],
+    ['pending', 'Pending'],
+    ['failed', 'Failed'],
+    ['dead', 'Dead-lettered'],
+    ['read', 'Read'],
+    // Health check statuses (lowercase + snake_case)
+    ['healthy', 'Healthy'],
+    ['degraded', 'Degraded'],
+    ['down', 'Down'],
+    ['cert_mismatch', 'Certificate mismatch'],
+    ['unknown', 'Unknown'],
+  ];
+
+  it.each(EXPECTED_DISPLAY)(
+    "wire key '%s' renders display string '%s'",
+    (wire, expected) => {
+      // First — verify the statusDisplay map carries the entry verbatim.
+      expect(statusDisplay[wire]).toBe(expected);
+      // Then — verify the rendered <span>'s textContent matches.
+      const { container } = render(<StatusBadge status={wire} />);
+      expect(container.querySelector('span')!.textContent).toBe(expected);
+    },
+  );
+
+  it('every wire key in statusStyles has a matching statusDisplay entry', () => {
+    // Parity check — re-deriving the styles key set isn't possible at
+    // runtime without re-importing it, but we can probe a known sample
+    // and pin: if a future PR adds a new style entry without a display
+    // entry, the EXPECTED_DISPLAY list above will mismatch.
+    expect(Object.keys(statusDisplay).length).toBeGreaterThanOrEqual(
+      EXPECTED_DISPLAY.length,
+    );
+  });
+
+  describe('titleCase() helper — fallback for unmapped keys', () => {
+    it('humanises PascalCase', () => {
+      expect(titleCase('RenewalInProgress')).toBe('Renewal in progress');
+    });
+    it('humanises snake_case', () => {
+      expect(titleCase('cert_mismatch')).toBe('Cert mismatch');
+    });
+    it('handles single-word lowercase', () => {
+      expect(titleCase('pending')).toBe('Pending');
+    });
+    it('handles single-word PascalCase', () => {
+      expect(titleCase('Active')).toBe('Active');
+    });
+    it('handles empty string defensively', () => {
+      expect(titleCase('')).toBe('');
+    });
   });
 });

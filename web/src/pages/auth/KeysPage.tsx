@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   authListKeys,
   authListRoles,
@@ -11,6 +12,7 @@ import {
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 // =============================================================================
 // Bundle 1 Phase 10 — KeysPage.
@@ -44,20 +46,33 @@ export default function KeysPage() {
   const [assignTarget, setAssignTarget] = useState<AuthKeyEntry | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // UX-H2 closure — replace window.confirm() with ConfirmDialog.
+  const [confirmRevoke, setConfirmRevoke] = useState<
+    { entry: AuthKeyEntry; roleID: string } | null
+  >(null);
 
   const canAssign = me.hasPerm('auth.role.assign') || me.isAdmin();
   const canRevoke = me.hasPerm('auth.role.assign') || me.isAdmin();
 
-  const handleRevoke = async (entry: AuthKeyEntry, roleID: string) => {
+  const handleRevoke = (entry: AuthKeyEntry, roleID: string) => {
     if (entry.actor_id === DEMO_ANON) return;
-    if (!window.confirm(`Revoke ${roleID} from ${entry.actor_id}?`)) return;
+    setConfirmRevoke({ entry, roleID });
+  };
+
+  const performRevoke = async () => {
+    if (!confirmRevoke) return;
+    const { entry, roleID } = confirmRevoke;
+    setConfirmRevoke(null);
     setBusy(true);
     setActionError(null);
     try {
       await authRevokeKeyRole(entry.actor_id, roleID);
+      toast.success(`Revoked ${roleID} from ${entry.actor_id}`);
       qc.invalidateQueries({ queryKey: ['auth', 'keys'] });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setActionError(msg);
+      toast.error(`Revoke failed: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -173,6 +188,19 @@ export default function KeysPage() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={confirmRevoke !== null}
+        title="Revoke role grant"
+        message={
+          confirmRevoke
+            ? `Revoke ${confirmRevoke.roleID} from ${confirmRevoke.entry.actor_id}? The actor will lose every permission scoped to that role on the next request.`
+            : ''
+        }
+        confirmLabel="Revoke"
+        destructive
+        onConfirm={performRevoke}
+        onCancel={() => setConfirmRevoke(null)}
+      />
     </div>
   );
 }

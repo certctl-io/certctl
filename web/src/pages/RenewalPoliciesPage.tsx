@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import {
   getRenewalPolicies,
@@ -206,7 +207,8 @@ export default function RenewalPoliciesPage() {
     // alert so the operator sees "this policy is still attached to N
     // certificates" and can re-target those certs to another policy
     // before deleting.
-    onError: (err: Error) => alert(`Delete failed: ${err.message}`),
+    onSuccess: () => toast.success('Renewal policy deleted'),
+    onError: (err: Error) => toast.error(`Delete failed: ${err.message}`),
   });
 
   const columns: Column<RenewalPolicy>[] = [

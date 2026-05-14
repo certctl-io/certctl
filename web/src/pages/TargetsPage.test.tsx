@@ -93,23 +93,37 @@ describe('TargetsPage — T-1 page coverage', () => {
   });
 
   it('Delete confirm flow calls deleteTarget(id)', async () => {
-    const origConfirm = globalThis.confirm;
-    globalThis.confirm = vi.fn(() => true);
-    try {
-      renderWithQuery(<TargetsPage />);
-      await waitFor(() => {
-        expect(screen.getByText('IIS Web01')).toBeInTheDocument();
-      });
+    // Phase 1 UX-H2 closure: Delete now opens a ConfirmDialog primitive
+    // (Headless UI) rather than firing window.confirm(). The new flow:
+    //   1. operator clicks the row's "Delete" button → sets state
+    //      that opens the dialog
+    //   2. ConfirmDialog mounts with title "Delete deployment target"
+    //   3. operator clicks the dialog's destructive "Delete" button
+    //   4. deleteTarget(id) fires
+    renderWithQuery(<TargetsPage />);
+    await waitFor(() => {
+      expect(screen.getByText('IIS Web01')).toBeInTheDocument();
+    });
 
-      const deleteButtons = await screen.findAllByRole('button', { name: 'Delete' });
-      fireEvent.click(deleteButtons[0]!);
+    const rowDeleteButtons = await screen.findAllByRole('button', { name: 'Delete' });
+    fireEvent.click(rowDeleteButtons[0]!);
 
-      await waitFor(() => {
-        expect(client.deleteTarget).toHaveBeenCalled();
-      });
-      expect(vi.mocked(client.deleteTarget).mock.calls[0]?.[0]).toBe('tgt-iis-prod');
-    } finally {
-      globalThis.confirm = origConfirm;
-    }
+    // Wait for the dialog title to mount (Headless UI Transition).
+    await waitFor(() => {
+      expect(screen.getByText('Delete deployment target')).toBeInTheDocument();
+    });
+
+    // Click the dialog's destructive-styled confirm button (.btn-danger).
+    const allDeleteButtons = await screen.findAllByRole('button', { name: 'Delete' });
+    const dialogDeleteBtn = allDeleteButtons.find((b) =>
+      b.className.includes('btn-danger'),
+    );
+    expect(dialogDeleteBtn).toBeDefined();
+    fireEvent.click(dialogDeleteBtn!);
+
+    await waitFor(() => {
+      expect(client.deleteTarget).toHaveBeenCalled();
+    });
+    expect(vi.mocked(client.deleteTarget).mock.calls[0]?.[0]).toBe('tgt-iis-prod');
   });
 });

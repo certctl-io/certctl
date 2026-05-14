@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   authGetRole,
   authListPermissions,
@@ -13,6 +14,7 @@ import {
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 // =============================================================================
 // Bundle 1 Phase 10 — RoleDetailPage.
@@ -65,6 +67,8 @@ export default function RoleDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // UX-H2 closure — replace window.confirm with ConfirmDialog.
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const canEdit = me.hasPerm('auth.role.edit') || me.isAdmin();
   const canDelete = me.hasPerm('auth.role.delete') || me.isAdmin();
@@ -83,15 +87,22 @@ export default function RoleDetailPage() {
 
   const { role, permissions } = detailQuery.data;
 
-  const handleDelete = async () => {
-    if (!window.confirm(`Delete role ${role.name}? This cannot be undone.`)) return;
+  const handleDelete = () => {
+    setConfirmDelete(true);
+  };
+
+  const performDelete = async () => {
+    setConfirmDelete(false);
     setSubmitting(true);
     setActionError(null);
     try {
       await authDeleteRole(role.id);
+      toast.success(`Role ${role.name} deleted`);
       navigate('/auth/roles');
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setActionError(msg);
+      toast.error(`Delete failed: ${msg}`);
     } finally {
       setSubmitting(false);
     }
@@ -260,6 +271,15 @@ export default function RoleDetailPage() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete role"
+        message={`Delete role ${role.name}? Every actor currently holding this role grant will lose those permissions. This cannot be undone.`}
+        confirmLabel="Delete role"
+        destructive
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }

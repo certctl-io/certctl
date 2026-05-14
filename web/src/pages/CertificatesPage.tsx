@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import { Transition } from '@headlessui/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { useListParams } from '../hooks/useListParams';
 import { useNavigate } from 'react-router-dom';
@@ -511,9 +513,29 @@ export default function CertificatesPage() {
         total: result.total_matched,
         running: false,
       });
-    } catch {
+      // UX-L5 closure (Phase 1): post-action toast with a "View jobs"
+      // action that deep-links to the Jobs page filtered to the
+      // certificate IDs we just renewed. The audit's missing
+      // "what just happened" affordance — operators can now jump
+      // straight to the resulting jobs.
+      if (result.total_enqueued > 0) {
+        toast.success(
+          `Triggered renewal for ${result.total_enqueued} certificate${result.total_enqueued > 1 ? 's' : ''}`,
+          {
+            action: {
+              label: `View ${result.total_enqueued} jobs`,
+              onClick: () =>
+                navigate(`/jobs?certificate_ids=${ids.join(',')}`),
+            },
+            duration: 8000,
+          },
+        );
+      }
+    } catch (err) {
       // surface as a "0 of N" terminal state — no retries.
       setBulkRenewProgress({ done: 0, total: ids.length, running: false });
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Bulk renewal failed: ${msg}`);
     }
     queryClient.invalidateQueries({ queryKey: ['certificates'] });
     setSelectedIds(new Set());
@@ -566,8 +588,20 @@ export default function CertificatesPage() {
         }
       />
 
-      {/* Bulk Action Bar */}
-      {hasSelection && (
+      {/* Bulk Action Bar — UX-L5 (Phase 1): Headless UI <Transition>
+          wraps the slide-in/out so the bar doesn't snap when selection
+          flips. Transition respects prefers-reduced-motion via the
+          global @media block in index.css. */}
+      <Transition
+        show={hasSelection}
+        as={Fragment}
+        enter="transition-all duration-200 ease-out"
+        enterFrom="opacity-0 -translate-y-2"
+        enterTo="opacity-100 translate-y-0"
+        leave="transition-all duration-150 ease-in"
+        leaveFrom="opacity-100 translate-y-0"
+        leaveTo="opacity-0 -translate-y-2"
+      >
         <div className="px-6 py-3 bg-brand-50 border-b border-brand-200 flex items-center justify-between">
           <span className="text-sm text-brand-600 font-medium">{selectedArray.length} selected</span>
           <div className="flex gap-2">
@@ -593,7 +627,7 @@ export default function CertificatesPage() {
             </button>
           </div>
         </div>
-      )}
+      </Transition>
 
       {/* Bulk Renewal Success */}
       {bulkRenewProgress && !bulkRenewProgress.running && (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getAgentGroups, deleteAgentGroup, createAgentGroup, updateAgentGroup } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -7,6 +8,7 @@ import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { formatDateTime } from '../api/utils';
 import type { AgentGroup } from '../api/types';
 
@@ -254,6 +256,7 @@ export default function AgentGroupsPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [editingGroup, setEditingGroup] = useState<AgentGroup | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<AgentGroup | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['agent-groups'],
@@ -263,6 +266,8 @@ export default function AgentGroupsPage() {
   const deleteMutation = useTrackedMutation({
     mutationFn: deleteAgentGroup,
     invalidates: [['agent-groups']],
+    onSuccess: () => toast.success('Agent group deleted'),
+    onError: (err: Error) => toast.error(`Delete failed: ${err.message}`),
   });
 
   const createMutation = useTrackedMutation({
@@ -337,7 +342,7 @@ export default function AgentGroupsPage() {
             Edit
           </button>
           <button
-            onClick={(e) => { e.stopPropagation(); if (confirm(`Delete group ${g.name}?`)) deleteMutation.mutate(g.id); }}
+            onClick={(e) => { e.stopPropagation(); setConfirmDelete(g); }}
             className="text-xs text-red-600 hover:text-red-700 transition-colors"
           >
             Delete
@@ -384,6 +389,22 @@ export default function AgentGroupsPage() {
         }}
         isLoading={updateMutation.isPending}
         error={updateMutation.error ? (updateMutation.error as Error).message : null}
+      />
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Delete agent group"
+        message={
+          confirmDelete
+            ? `Delete group ${confirmDelete.name}? This will remove the group definition; agents currently in the group will fall back to default assignment.`
+            : ''
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (confirmDelete) deleteMutation.mutate(confirmDelete.id);
+          setConfirmDelete(null);
+        }}
+        onCancel={() => setConfirmDelete(null)}
       />
     </>
   );

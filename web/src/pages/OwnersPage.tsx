@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getOwners, getTeams, deleteOwner, createOwner, updateOwner } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { formatDateTime } from '../api/utils';
 import type { Owner, Team } from '../api/types';
 
@@ -211,10 +213,13 @@ export default function OwnersPage() {
     queryFn: () => getTeams(),
   });
 
+  const [confirmDelete, setConfirmDelete] = useState<Owner | null>(null);
+
   const deleteMutation = useTrackedMutation({
     mutationFn: deleteOwner,
     invalidates: [['owners']],
-    onError: (err: Error) => alert(`Delete failed: ${err.message}`),
+    onSuccess: () => toast.success('Owner deleted'),
+    onError: (err: Error) => toast.error(`Delete failed: ${err.message}`),
   });
 
   const createMutation = useTrackedMutation({
@@ -279,7 +284,7 @@ export default function OwnersPage() {
             Edit
           </button>
           <button
-            onClick={(e) => { e.stopPropagation(); if (confirm(`Delete owner ${o.name}?`)) deleteMutation.mutate(o.id); }}
+            onClick={(e) => { e.stopPropagation(); setConfirmDelete(o); }}
             className="text-xs text-red-600 hover:text-red-700 transition-colors"
           >
             Delete
@@ -328,6 +333,22 @@ export default function OwnersPage() {
         isLoading={updateMutation.isPending}
         error={updateMutation.error ? (updateMutation.error as Error).message : null}
         teamsData={teamsData}
+      />
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Delete owner"
+        message={
+          confirmDelete
+            ? `Delete owner ${confirmDelete.name}? This action cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (confirmDelete) deleteMutation.mutate(confirmDelete.id);
+          setConfirmDelete(null);
+        }}
+        onCancel={() => setConfirmDelete(null)}
       />
     </>
   );

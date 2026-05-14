@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getTargets, createTarget, deleteTarget, getAgents } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -8,6 +9,7 @@ import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { formatDateTime } from '../api/utils';
 import type { Target } from '../api/types';
 
@@ -403,6 +405,7 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
 export default function TargetsPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<Target | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['targets'],
@@ -412,6 +415,8 @@ export default function TargetsPage() {
   const deleteMutation = useTrackedMutation({
     mutationFn: deleteTarget,
     invalidates: [['targets']],
+    onSuccess: () => toast.success('Target deleted'),
+    onError: (err: Error) => toast.error(`Delete failed: ${err.message}`),
   });
 
   const columns: Column<Target>[] = [
@@ -462,7 +467,7 @@ export default function TargetsPage() {
       label: '',
       render: (t) => (
         <button
-          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete target ${t.name}?`)) deleteMutation.mutate(t.id); }}
+          onClick={(e) => { e.stopPropagation(); setConfirmDelete(t); }}
           className="text-xs text-red-600 hover:text-red-700 transition-colors"
         >
           Delete
@@ -498,6 +503,22 @@ export default function TargetsPage() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Delete deployment target"
+        message={
+          confirmDelete
+            ? `Delete target ${confirmDelete.name}? Active deployments referencing this target will fail until reconfigured.`
+            : ''
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (confirmDelete) deleteMutation.mutate(confirmDelete.id);
+          setConfirmDelete(null);
+        }}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </>
   );
 }
