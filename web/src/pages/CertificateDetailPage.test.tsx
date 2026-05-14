@@ -163,6 +163,85 @@ describe('CertificateDetailPage — render + XSS hardening (M-026 / M-029 Pass 3
 //      non-admin viewers.
 // -----------------------------------------------------------------------------
 
+// -----------------------------------------------------------------------------
+// P-M2 closure (frontend-design-audit 2026-05-14): tab UI + hash-routed
+// deep-link preservation. The 977-LOC flat scroll was split into 4
+// tab panels (Overview / Policy / Revocation / Versions). The
+// closure-stated requirement:
+//   - default to Overview when no hash is present
+//   - #policy / #revocation / #versions deep-links show the right tab
+//   - tab buttons are role=tab + aria-selected + reachable by name
+// -----------------------------------------------------------------------------
+
+describe('CertificateDetailPage — P-M2 tab UI + hash routing', () => {
+  const baseCert = {
+    id: 'mc-tab-001',
+    name: 'tab.example.com',
+    common_name: 'tab.example.com',
+    sans: ['tab.example.com'],
+    status: 'Active',
+    environment: 'prod',
+    issuer_id: 'iss-x',
+    certificate_profile_id: 'cp-x',
+    owner_id: 'o-x',
+    team_id: 't-x',
+    renewal_policy_id: 'rp-x',
+    expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+    vi.mocked(client.getCertificate).mockResolvedValue(baseCert as never);
+    vi.mocked(client.getCertificateVersions).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
+    vi.mocked(client.getTargets).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
+    vi.mocked(client.getProfile).mockResolvedValue({ id: 'cp-x', name: 'X' } as never);
+    vi.mocked(client.getProfiles).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
+    vi.mocked(client.getRenewalPolicies).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 500 } as never);
+    vi.mocked(client.getJobs).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
+    vi.mocked(client.fetchCRL).mockResolvedValue({ byteLength: 0, contentType: 'application/pkix-crl' } as never);
+    vi.mocked(client.getOCSPStatus).mockResolvedValue(new ArrayBuffer(0) as never);
+    vi.mocked(client.getAdminCRLCache).mockResolvedValue({ cache_rows: [], row_count: 0, generated_at: new Date().toISOString() } as never);
+  });
+
+  it('renders 4 tabs with role=tab + the audit-specified names', async () => {
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-tab-001');
+    await screen.findByTestId('certificate-detail-tabs');
+    for (const name of ['Overview', 'Policy', 'Revocation', 'Versions']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument();
+    }
+  });
+
+  it('defaults to Overview tab when no hash is present (the audit-required default)', async () => {
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-tab-001');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+    });
+    // Cert Details lives on Overview — visible.
+    expect(screen.getByText('Certificate Details')).toBeInTheDocument();
+  });
+
+  it('#versions deep-link activates the Versions tab (URL preservation works)', async () => {
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-tab-001#versions');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Versions' })).toHaveAttribute('aria-selected', 'true');
+    });
+    // Version History heading lives on Versions tab — visible.
+    expect(screen.getByText(/Version History/)).toBeInTheDocument();
+    // Overview's Cert Details is HIDDEN on Versions tab.
+    expect(screen.queryByText('Certificate Details')).toBeNull();
+  });
+
+  it('unknown hash falls back to Overview (no broken state on bad deep-link)', async () => {
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-tab-001#nope');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+    });
+  });
+});
+
 describe('CertificateDetailPage — Revocation Endpoints panel (Phase 5)', () => {
   const plainCert = {
     id: 'mc-rev-001',
@@ -211,7 +290,7 @@ describe('CertificateDetailPage — Revocation Endpoints panel (Phase 5)', () =>
   it('renders the CRL distribution point + OCSP responder URLs with the issuer_id substituted', async () => {
     const { fireEvent: _fe } = await import('@testing-library/react');
     void _fe;
-    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001');
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001#revocation');
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Revocation Endpoints' })).toBeInTheDocument();
     });
@@ -224,7 +303,7 @@ describe('CertificateDetailPage — Revocation Endpoints panel (Phase 5)', () =>
 
   it('"Test CRL fetch" button calls fetchCRL(issuer_id) and shows the byte-count success message', async () => {
     const { fireEvent } = await import('@testing-library/react');
-    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001');
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001#revocation');
     const btn = await screen.findByRole('button', { name: /Test CRL fetch/i });
     fireEvent.click(btn);
     await waitFor(() => {
@@ -235,7 +314,7 @@ describe('CertificateDetailPage — Revocation Endpoints panel (Phase 5)', () =>
 
   it('"Check OCSP status" button calls getOCSPStatus(issuer_id, serial_hex) and shows DER byte-count', async () => {
     const { fireEvent } = await import('@testing-library/react');
-    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001');
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001#revocation');
     const btn = await screen.findByRole('button', { name: /Check OCSP status/i });
     fireEvent.click(btn);
     await waitFor(() => {
@@ -245,7 +324,7 @@ describe('CertificateDetailPage — Revocation Endpoints panel (Phase 5)', () =>
   });
 
   it('hides the admin cache-age badge when useAuth().admin is false (no information leak to non-admin)', async () => {
-    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001');
+    renderRoute(<CertificateDetailPage />, '/certificates/mc-rev-001#revocation');
     await screen.findByRole('heading', { name: 'Revocation Endpoints' });
     // None of the badge variants ("Cache fresh" / "Cache stale" / "Not yet
     // generated") should appear for a non-admin caller.

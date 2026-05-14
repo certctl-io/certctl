@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
@@ -414,9 +414,38 @@ function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { cer
   );
 }
 
+// P-M2 + FE-M3 closure (frontend-design-audit 2026-05-14): hash-based
+// tab routing. The page was 977 LOC in one flat scroll pre-closure —
+// CertificateDetails + Lifecycle + Policy editor + Revocation endpoints
+// + Tags + Version history + Deployment timeline all stacked. Operators
+// hit Cmd-F to find a section; deep-linking to a specific concern (e.g.
+// the policy editor for a coworker review) wasn't possible.
+//
+// Closure: 4 tabs gated on URL hash. Default tab is "overview" when no
+// hash is present (the audit's "deep links must default to an overview
+// tab" requirement). Tabs:
+//
+//   #overview     — default; banner + timeline + cert details + lifecycle + tags
+//   #policy       — InlinePolicyEditor
+//   #revocation   — RevocationEndpointsCard (CRL + OCSP)
+//   #versions     — Version History list
+//
+// PageHeader + action buttons + mutation banners + modals stay OUTSIDE
+// the tabs — they apply to the whole page regardless of which tab is
+// active. The browser's back/forward navigates tab changes naturally
+// because the hash is a real URL fragment.
+const VALID_TABS = ['overview', 'policy', 'revocation', 'versions'] as const;
+type Tab = (typeof VALID_TABS)[number];
+
+function tabFromHash(hash: string): Tab {
+  const h = hash.replace(/^#/, '');
+  return (VALID_TABS as readonly string[]).includes(h) ? (h as Tab) : 'overview';
+}
+
 export default function CertificateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [showDeploy, setShowDeploy] = useState(false);
   const [deployTargetId, setDeployTargetId] = useState('');
@@ -426,6 +455,21 @@ export default function CertificateDetailPage() {
   const [pkcs12Password, setPkcs12Password] = useState('');
   const [exporting, setExporting] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+
+  // P-M2: derive active tab from URL hash so deep-links restore state
+  // and browser back/forward navigates tabs. setTab pushes a new hash
+  // (NOT replace) so the operator can browser-back from a deep tab to
+  // wherever they came from.
+  const [tab, setTabState] = useState<Tab>(() => tabFromHash(location.hash));
+  useEffect(() => {
+    setTabState(tabFromHash(location.hash));
+  }, [location.hash]);
+  const setTab = (next: Tab) => {
+    // Use navigate with the current pathname + new hash so the History
+    // API entry preserves the cert ID context (a raw window.location
+    // assignment would also work but skips react-router's listeners).
+    navigate({ pathname: location.pathname, hash: '#' + next });
+  };
 
   const { data: cert, isLoading, error, refetch } = useQuery({
     queryKey: ['certificate', id],
@@ -635,6 +679,41 @@ export default function CertificateDetailPage() {
         }
       />
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* P-M2 tab strip — hash-routed. Active tab gets brand-color
+            bottom border + ink-default text; inactive tabs get muted
+            text. aria-selected + role=tab for SR users. */}
+        <div
+          className="flex gap-1 border-b border-surface-border -mx-6 px-6"
+          role="tablist"
+          aria-label="Certificate detail sections"
+          data-testid="certificate-detail-tabs"
+        >
+          {VALID_TABS.map((t) => {
+            const label = t.charAt(0).toUpperCase() + t.slice(1);
+            const isActive = tab === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`cert-detail-tabpanel-${t}`}
+                id={`cert-detail-tab-${t}`}
+                data-testid={`cert-detail-tab-${t}`}
+                onClick={() => setTab(t)}
+                className={
+                  'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ' +
+                  (isActive
+                    ? 'border-brand-500 text-ink'
+                    : 'border-transparent text-ink-muted hover:text-ink')
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
         {renewMutation.isSuccess && (
           <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded px-4 py-3 text-sm">
             Renewal triggered successfully. A renewal job has been created.
@@ -671,6 +750,14 @@ export default function CertificateDetailPage() {
           </div>
         )}
 
+        {/* ── Overview tab panel ─────────────────────────────────── */}
+        {tab === 'overview' && (
+        <div
+          role="tabpanel"
+          id="cert-detail-tabpanel-overview"
+          aria-labelledby="cert-detail-tab-overview"
+          className="space-y-6"
+        >
         {/* Revocation Banner */}
         {isRevoked && (
           <div className="bg-red-50 border border-red-200 rounded px-4 py-3">
@@ -788,16 +875,6 @@ export default function CertificateDetailPage() {
           </div>
         </div>
 
-        {/* Inline Policy Editor */}
-        <InlinePolicyEditor
-          certId={id!}
-          currentPolicyId={cert.renewal_policy_id || ''}
-          currentProfileId={cert.certificate_profile_id || ''}
-        />
-
-        {/* Revocation Endpoints (CRL + OCSP) — Phase 5 */}
-        <RevocationEndpointsCard issuerId={cert.issuer_id} serialNumber={serialNumber} />
-
         {/* Tags */}
         {cert.tags && Object.keys(cert.tags).length > 0 && (
           <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
@@ -809,7 +886,45 @@ export default function CertificateDetailPage() {
             </div>
           </div>
         )}
+        </div>
+        )}
 
+        {/* ── Policy tab panel ──────────────────────────────────── */}
+        {tab === 'policy' && (
+        <div
+          role="tabpanel"
+          id="cert-detail-tabpanel-policy"
+          aria-labelledby="cert-detail-tab-policy"
+          className="space-y-6"
+        >
+          <InlinePolicyEditor
+            certId={id!}
+            currentPolicyId={cert.renewal_policy_id || ''}
+            currentProfileId={cert.certificate_profile_id || ''}
+          />
+        </div>
+        )}
+
+        {/* ── Revocation tab panel ──────────────────────────────── */}
+        {tab === 'revocation' && (
+        <div
+          role="tabpanel"
+          id="cert-detail-tabpanel-revocation"
+          aria-labelledby="cert-detail-tab-revocation"
+          className="space-y-6"
+        >
+          <RevocationEndpointsCard issuerId={cert.issuer_id} serialNumber={serialNumber} />
+        </div>
+        )}
+
+        {/* ── Versions tab panel ────────────────────────────────── */}
+        {tab === 'versions' && (
+        <div
+          role="tabpanel"
+          id="cert-detail-tabpanel-versions"
+          aria-labelledby="cert-detail-tab-versions"
+          className="space-y-6"
+        >
         {/* Version History */}
         <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-ink-muted mb-4">
@@ -848,6 +963,8 @@ export default function CertificateDetailPage() {
             </div>
           )}
         </div>
+        </div>
+        )}
       </div>
 
       {/* Deploy Modal */}
