@@ -36,7 +36,19 @@ test.describe('Priority Flow 3 — settings: timestamp display preference', () =
     await expect(page.getByTestId('timestamp-mode-custom')).not.toBeChecked();
   });
 
+  // Hotfix #17 (2026-05-14): page.reload() in this spec re-runs
+  // AuthProvider's bootstrap (calls /api/v1/auth/info /me /bootstrap /
+  // runtime-config). With no backend in CI those 4 calls ECONNREFUSED;
+  // AuthProvider sits in `loading` state and the page never re-mounts
+  // past the loading shell → the radio's checked state can't be
+  // re-asserted because the radio isn't rendered. The card-render
+  // test + invalid-IANA fallback test in this same file PASS in CI
+  // because they don't trigger a reload. Skip just the persist test
+  // until CI grows a backend.
+  const NEEDS_BACKEND = !process.env.CERTCTL_E2E_BACKEND_URL && !!process.env.CI;
+
   test('happy: flip to Local + reload → preference persists', async ({ page }) => {
+    test.skip(NEEDS_BACKEND, 'requires backend in CI (Hotfix #17); page.reload() re-runs AuthProvider bootstrap');
     await page.goto('/auth/settings');
     await page.getByTestId('timestamp-mode-local').check();
     await expect(page.getByTestId('timestamp-mode-local')).toBeChecked();
