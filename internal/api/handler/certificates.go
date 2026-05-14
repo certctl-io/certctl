@@ -52,7 +52,7 @@ type CertificateService interface {
 // CertificateHandler handles HTTP requests for certificate operations.
 type CertificateHandler struct {
 	svc         CertificateService
-	ocspLimiter *ratelimit.SlidingWindowLimiter // production hardening II Phase 3 — per-source-IP cap on OCSP
+	ocspLimiter ratelimit.Limiter // production hardening II Phase 3 — per-source-IP cap on OCSP
 }
 
 // NewCertificateHandler creates a new CertificateHandler with a service dependency.
@@ -65,7 +65,7 @@ func NewCertificateHandler(svc CertificateService) CertificateHandler {
 // cmd/server/main.go): 1000 req/min/IP. Setting to nil disables the
 // limit; the limiter's own NewSlidingWindowLimiter(maxN<=0, ...)
 // also produces a no-op limiter, so the env-var-zero case is safe.
-func (h *CertificateHandler) SetOCSPRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+func (h *CertificateHandler) SetOCSPRateLimiter(l ratelimit.Limiter) {
 	h.ocspLimiter = l
 }
 

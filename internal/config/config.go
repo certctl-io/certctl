@@ -441,11 +441,13 @@ func Load() (*Config, error) {
 			},
 		},
 		RateLimit: RateLimitConfig{
-			Enabled:          getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
-			RPS:              getEnvFloat("CERTCTL_RATE_LIMIT_RPS", 50),
-			BurstSize:        getEnvInt("CERTCTL_RATE_LIMIT_BURST", 100),
-			PerUserRPS:       getEnvFloat("CERTCTL_RATE_LIMIT_PER_USER_RPS", 0),
-			PerUserBurstSize: getEnvInt("CERTCTL_RATE_LIMIT_PER_USER_BURST", 0),
+			Enabled:                      getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
+			RPS:                          getEnvFloat("CERTCTL_RATE_LIMIT_RPS", 50),
+			BurstSize:                    getEnvInt("CERTCTL_RATE_LIMIT_BURST", 100),
+			PerUserRPS:                   getEnvFloat("CERTCTL_RATE_LIMIT_PER_USER_RPS", 0),
+			PerUserBurstSize:             getEnvInt("CERTCTL_RATE_LIMIT_PER_USER_BURST", 0),
+			SlidingWindowBackend:         getEnv("CERTCTL_RATE_LIMIT_BACKEND", "memory"),
+			SlidingWindowJanitorInterval: getEnvDuration("CERTCTL_RATE_LIMIT_JANITOR_INTERVAL", 5*time.Minute),
 		},
 		CORS: CORSConfig{
 			AllowedOrigins: getEnvList("CERTCTL_CORS_ORIGINS", nil),
@@ -761,6 +763,36 @@ func (c *Config) Validate() error {
 		return fmt.Errorf(
 			"CERTCTL_CONFIG_ENCRYPTION_KEY too short (%d bytes; minimum %d). Generate with: openssl rand -base64 32",
 			len(c.Encryption.ConfigEncryptionKey), minEncryptionKeyLength,
+		)
+	}
+
+	// Phase 13 Sprint 13.3 closure (ARCH-M1): validate
+	// CERTCTL_RATE_LIMIT_BACKEND is one of the two supported values.
+	// Fail-closed on any other input so a typo doesn't silently fall
+	// back to the wrong backend (the operator picked "postgress" and
+	// got memory rate-limits in a 3-replica cluster).
+	switch c.RateLimit.SlidingWindowBackend {
+	case "", "memory", "postgres":
+		// "" is treated as "memory" — test-built Configs (which
+		// construct the struct literal directly without going
+		// through Load()) don't get the default; Load() always
+		// fills "memory". Either path lands the runtime on the
+		// in-memory backend.
+	default:
+		return fmt.Errorf(
+			"invalid CERTCTL_RATE_LIMIT_BACKEND=%q — refuse to start: must be \"memory\" (default, per-process limits; for single-replica deploys) or \"postgres\" (cross-replica-consistent via the rate_limit_buckets table; required for HA deploys). See docs/operator/observability.md.",
+			c.RateLimit.SlidingWindowBackend,
+		)
+	}
+	// Janitor interval lower bound — 1 minute. Below this the sweep
+	// cost outweighs the row-cleanup benefit; above this still
+	// matches the operator's bound (5 minutes default; can be raised
+	// indefinitely).
+	if c.RateLimit.SlidingWindowJanitorInterval > 0 &&
+		c.RateLimit.SlidingWindowJanitorInterval < time.Minute {
+		return fmt.Errorf(
+			"invalid CERTCTL_RATE_LIMIT_JANITOR_INTERVAL=%v — refuse to start: must be ≥ 1 minute (default 5m).",
+			c.RateLimit.SlidingWindowJanitorInterval,
 		)
 	}
 

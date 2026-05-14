@@ -321,6 +321,46 @@ type RateLimitConfig struct {
 	// zero, BurstSize is used. Default: 0 (use BurstSize).
 	// Setting: CERTCTL_RATE_LIMIT_PER_USER_BURST environment variable.
 	PerUserBurstSize int
+
+	// SlidingWindowBackend selects which backend implements the
+	// per-key sliding-window-log limiters wired in cmd/server/main.go
+	// (break-glass login, OCSP per-IP, cert-export per-actor, EST
+	// per-principal, EST failed-basic source-IP). Distinct from the
+	// token-bucket fields above — those are middleware RPS limits
+	// applied across every request via the http handler chain; this
+	// field controls the sliding-window-log primitive used by
+	// authenticated-but-shared-credential code paths.
+	//
+	// Valid values:
+	//   "memory"   — per-process, sync.Mutex-guarded map (historical
+	//                default; perfect for single-replica deploys).
+	//   "postgres" — cross-replica-consistent via the
+	//                rate_limit_buckets table (migration 000046).
+	//                SELECT FOR UPDATE arbitrates per-key access
+	//                across the cluster. Adds ~2 DB round-trips per
+	//                Allow call; acceptable on the gated hot path.
+	//
+	// Default: "memory". HA deploys with server.replicas > 1 should
+	// flip to "postgres" so a 2-replica deployment doesn't effectively
+	// double the per-key cap.
+	//
+	// Phase 13 Sprint 13.2/13.3 closure (architecture diligence audit
+	// ARCH-M1). See docs/operator/observability.md.
+	//
+	// Setting: CERTCTL_RATE_LIMIT_BACKEND environment variable.
+	SlidingWindowBackend string
+
+	// SlidingWindowJanitorInterval is how often the scheduler sweeps
+	// stale rows from rate_limit_buckets. A row is stale when its
+	// updated_at is older than the longest configured window any
+	// caller uses (currently 24h for the EST per-principal limiter).
+	// Default: 5 minutes. Minimum: 1 minute. No-op when
+	// SlidingWindowBackend = "memory" (the in-memory backend's
+	// prune-on-Allow path keeps buckets short-lived without a
+	// separate sweep).
+	//
+	// Setting: CERTCTL_RATE_LIMIT_JANITOR_INTERVAL environment variable.
+	SlidingWindowJanitorInterval time.Duration
 }
 
 // CORSConfig contains CORS configuration.

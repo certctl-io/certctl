@@ -78,7 +78,7 @@ type AuthBreakglassHandler struct {
 	// nil-safe: when unset, the handler skips the limiter check and
 	// relies on the service-layer Argon2id lockout. Production deploys
 	// MUST set this via SetLoginRateLimiter.
-	loginLimiter *ratelimit.SlidingWindowLimiter
+	loginLimiter ratelimit.Limiter
 }
 
 // NewAuthBreakglassHandler constructs the handler.
@@ -89,7 +89,7 @@ func NewAuthBreakglassHandler(svc BreakglassService, cookieAttrs SessionCookieAt
 // SetLoginRateLimiter wires the per-source-IP rate limiter the Login
 // handler enforces. Bundle 5 closure (S1) — see the AuthBreakglassHandler
 // type docstring for the full rationale.
-func (h *AuthBreakglassHandler) SetLoginRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+func (h *AuthBreakglassHandler) SetLoginRateLimiter(l ratelimit.Limiter) {
 	h.loginLimiter = l
 }
 

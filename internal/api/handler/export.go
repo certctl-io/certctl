@@ -28,7 +28,7 @@ type ExportService interface {
 // ExportHandler handles HTTP requests for certificate export operations.
 type ExportHandler struct {
 	svc           ExportService
-	exportLimiter *ratelimit.SlidingWindowLimiter // production hardening II Phase 3
+	exportLimiter ratelimit.Limiter // production hardening II Phase 3
 }
 
 // NewExportHandler creates a new ExportHandler with a service dependency.
@@ -40,7 +40,7 @@ func NewExportHandler(svc ExportService) ExportHandler {
 // Production hardening II Phase 3. Default cap (when set in
 // cmd/server/main.go): 50 exports/hr/operator. Setting to nil
 // disables the limit.
-func (h *ExportHandler) SetExportRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+func (h *ExportHandler) SetExportRateLimiter(l ratelimit.Limiter) {
 	h.exportLimiter = l
 }
 

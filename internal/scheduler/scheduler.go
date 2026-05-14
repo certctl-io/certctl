@@ -103,6 +103,21 @@ type BCLReplayGarbageCollector interface {
 	SweepExpired(ctx context.Context, now time.Time) (int, error)
 }
 
+// RateLimitGarbageCollector sweeps stale rows from the
+// rate_limit_buckets table introduced in migration 000046. Phase 13
+// Sprint 13.3 (ARCH-M1 closure completion) — wired only when
+// CERTCTL_RATE_LIMIT_BACKEND=postgres. Concrete impl is
+// *ratelimit.PostgresGC. Mirrors the ACMEGarbageCollector +
+// SessionGarbageCollector contracts so the scheduler reuses the same
+// atomic.Bool + WithTimeout + ticker pattern as the existing GC loops.
+//
+// Returns the row count to surface via observability logs (matches
+// SessionGarbageCollector's shape — the operator wants to see
+// "how many buckets did the sweep delete" in steady-state monitoring).
+type RateLimitGarbageCollector interface {
+	GarbageCollect(ctx context.Context) (int64, error)
+}
+
 // JobReaperService defines the interface for job timeout reaping used by the scheduler.
 type JobReaperService interface {
 	ReapTimedOutJobs(ctx context.Context, csrTTL, approvalTTL time.Duration) error
@@ -130,6 +145,7 @@ type Scheduler struct {
 	acmeGC                ACMEGarbageCollector
 	sessionGC             SessionGarbageCollector
 	bclReplayGC           BCLReplayGarbageCollector
+	rateLimitGC           RateLimitGarbageCollector
 	jobReaper             JobReaperService
 	logger                *slog.Logger
 
@@ -149,6 +165,7 @@ type Scheduler struct {
 	jobTimeoutInterval            time.Duration
 	acmeGCInterval                time.Duration
 	sessionGCInterval             time.Duration
+	rateLimitGCInterval           time.Duration
 	// agentOfflineJobTTL: per-tick threshold for reaping Running jobs whose
 	// owning agent has been silent. Bundle C / Audit M-016. Defaults below.
 	agentOfflineJobTTL      time.Duration
@@ -171,6 +188,7 @@ type Scheduler struct {
 	jobTimeoutRunning            atomic.Bool
 	acmeGCRunning                atomic.Bool
 	sessionGCRunning             atomic.Bool
+	rateLimitGCRunning           atomic.Bool
 
 	// Graceful shutdown: wait for in-flight work to complete
 	wg sync.WaitGroup
@@ -209,6 +227,7 @@ func NewScheduler(
 		jobTimeoutInterval:            10 * time.Minute,
 		acmeGCInterval:                1 * time.Minute,
 		sessionGCInterval:             1 * time.Hour,
+		rateLimitGCInterval:           5 * time.Minute,
 		// 5 minutes is 5×agentHealthCheckInterval default of 1m; an agent
 		// must miss multiple heartbeats before its in-flight jobs are reaped.
 		agentOfflineJobTTL: 5 * time.Minute,
@@ -365,6 +384,29 @@ func (s *Scheduler) SetSessionGCInterval(d time.Duration) {
 	s.sessionGCInterval = d
 }
 
+// SetRateLimitGarbageCollector wires the Phase 13 Sprint 13.3 rate-
+// limit bucket GC. Optional; nil disables the loop (which is the
+// correct behavior when CERTCTL_RATE_LIMIT_BACKEND=memory — the
+// in-memory backend's prune-on-Allow path keeps buckets short-lived
+// without a separate sweep).
+//
+// Concrete impl is *ratelimit.PostgresGC, constructed in
+// cmd/server/main.go only when the postgres backend is selected.
+func (s *Scheduler) SetRateLimitGarbageCollector(gc RateLimitGarbageCollector) {
+	s.rateLimitGC = gc
+}
+
+// SetRateLimitGCInterval configures the interval at which the rate-
+// limit GC sweep runs. Default 5m. Wire:
+// CERTCTL_RATE_LIMIT_JANITOR_INTERVAL. Zero or negative values are
+// ignored.
+func (s *Scheduler) SetRateLimitGCInterval(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.rateLimitGCInterval = d
+}
+
 // SetAgentOfflineJobTTL sets the threshold past which a Running job whose
 // owning agent has gone silent is reaped to Failed. Bundle C / Audit M-016.
 // Zero or negative values are ignored (the default of 5 minutes is kept).
@@ -426,6 +468,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		if s.sessionGC != nil {
 			loopCount++
 		}
+		if s.rateLimitGC != nil {
+			loopCount++
+		}
 		s.wg.Add(loopCount)
 
 		go func() { defer s.wg.Done(); s.renewalCheckLoop(ctx) }()
@@ -456,6 +501,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		}
 		if s.sessionGC != nil {
 			go func() { defer s.wg.Done(); s.sessionGCLoop(ctx) }()
+		}
+		if s.rateLimitGC != nil {
+			go func() { defer s.wg.Done(); s.rateLimitGCLoop(ctx) }()
 		}
 
 		// Signal that all loops are launched
@@ -1242,6 +1290,48 @@ func (s *Scheduler) sessionGCLoop(ctx context.Context) {
 					} else if n > 0 {
 						s.logger.Debug("bcl replay gc swept rows", "rows", n)
 					}
+				}
+			}()
+		}
+	}
+}
+
+// rateLimitGCLoop runs every rateLimitGCInterval and invokes
+// RateLimitGarbageCollector.GarbageCollect, which sweeps stale rows
+// from the rate_limit_buckets table introduced in Phase 13 Sprint
+// 13.2's migration 000046.
+//
+// Wired only when CERTCTL_RATE_LIMIT_BACKEND=postgres (the in-memory
+// backend's prune-on-Allow path keeps buckets short-lived without a
+// separate sweep — cmd/server/main.go skips SetRateLimitGarbageCollector
+// for that case so this loop never launches).
+//
+// Phase 13 Sprint 13.3 closure. The atomic.Bool guard + per-tick
+// context.WithTimeout match every other GC loop's pattern.
+func (s *Scheduler) rateLimitGCLoop(ctx context.Context) {
+	ticker := NewJitteredTicker(s.rateLimitGCInterval, DefaultSchedulerJitter)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.rateLimitGCRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("rate-limit GC sweep still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.rateLimitGCRunning.Store(false)
+				// 1-minute timeout matches acme + session GC loops.
+				opCtx, cancel := context.WithTimeout(ctx, time.Minute)
+				defer cancel()
+				if n, err := s.rateLimitGC.GarbageCollect(opCtx); err != nil {
+					s.logger.Warn("rate-limit gc sweep failed (next tick will retry)", "error", err)
+				} else if n > 0 {
+					s.logger.Debug("rate-limit gc swept stale buckets", "rows", n)
 				}
 			}()
 		}

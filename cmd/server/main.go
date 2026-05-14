@@ -577,7 +577,7 @@ func main() {
 	// AuthExemptRouterRoutes path. The service-layer Argon2id lockout
 	// state machine remains the second line of defense.
 	breakglassHandler.SetLoginRateLimiter(
-		ratelimit.NewSlidingWindowLimiter(5, time.Minute, 50_000),
+		ratelimit.NewLimiter(cfg.RateLimit.SlidingWindowBackend, db, 5, time.Minute, 50_000),
 	)
 	if cfg.Auth.Breakglass.Enabled {
 		logger.Warn("CERTCTL_BREAKGLASS_ENABLED=true — break-glass admin path is ACTIVE; this bypasses SSO. Disable in steady-state.",
@@ -1000,7 +1000,7 @@ func main() {
 	// Production hardening II Phase 3: per-source-IP OCSP rate limit.
 	// Window 1m so the cap counts requests per minute. Map cap 50k
 	// matches the SCEP/Intune replay cache cap. Zero disables.
-	ocspLimiter := ratelimit.NewSlidingWindowLimiter(cfg.Scheduler.OCSPRateLimitPerIPMin, time.Minute, 50_000)
+	ocspLimiter := ratelimit.NewLimiter(cfg.RateLimit.SlidingWindowBackend, db, cfg.Scheduler.OCSPRateLimitPerIPMin, time.Minute, 50_000)
 	certificateHandler.SetOCSPRateLimiter(ocspLimiter)
 	issuerHandler := handler.NewIssuerHandler(issuerService)
 	targetHandler := handler.NewTargetHandler(targetService)
@@ -1065,7 +1065,7 @@ func main() {
 	exportHandler := handler.NewExportHandler(exportService)
 	// Production hardening II Phase 3: per-actor cert-export rate limit.
 	// Window 1h so the cap counts exports per hour. Zero disables.
-	exportLimiter := ratelimit.NewSlidingWindowLimiter(cfg.Scheduler.CertExportRateLimitPerActorHr, time.Hour, 50_000)
+	exportLimiter := ratelimit.NewLimiter(cfg.RateLimit.SlidingWindowBackend, db, cfg.Scheduler.CertExportRateLimitPerActorHr, time.Hour, 50_000)
 	exportHandler.SetExportRateLimiter(exportLimiter)
 
 	bulkRevocationHandler := handler.NewBulkRevocationHandler(bulkRevocationService)
@@ -1209,6 +1209,29 @@ func main() {
 	sched.SetSessionGarbageCollector(sessionService)
 	sched.SetBCLReplayGarbageCollector(bclReplayRepo) // Audit 2026-05-10 HIGH-3.
 	sched.SetSessionGCInterval(cfg.Auth.Session.GCInterval)
+
+	// Phase 13 Sprint 13.3 closure (ARCH-M1): when the operator selected
+	// CERTCTL_RATE_LIMIT_BACKEND=postgres, wire the bucket janitor so
+	// stale rows from rate_limit_buckets get swept on the configured
+	// interval. The in-memory backend's prune-on-Allow path keeps
+	// buckets short-lived without a separate sweep, so we skip the
+	// loop entirely for backend=memory.
+	//
+	// maxWindow = 24h: the EST per-principal limiter is the longest
+	// window any current caller configures (the breakglass / OCSP /
+	// export / EST failed-basic limiters use shorter windows). Bump
+	// this if a new caller introduces a longer window — rows pruned
+	// inside their window aren't deletable.
+	if cfg.RateLimit.SlidingWindowBackend == "postgres" {
+		rateLimitGC := ratelimit.NewPostgresGC(db, 24*time.Hour)
+		sched.SetRateLimitGarbageCollector(rateLimitGC)
+		sched.SetRateLimitGCInterval(cfg.RateLimit.SlidingWindowJanitorInterval)
+		logger.Info("rate-limit GC sweep enabled (postgres backend)",
+			"interval", cfg.RateLimit.SlidingWindowJanitorInterval.String(),
+			"max_window", "24h")
+	} else {
+		logger.Info("rate-limit backend = memory; postgres GC sweep not wired (in-memory backend self-prunes)")
+	}
 	logger.Info("session GC sweep enabled",
 		"interval", cfg.Auth.Session.GCInterval.String(),
 		"absolute_timeout", cfg.Auth.Session.AbsoluteTimeout.String(),
@@ -1532,7 +1555,7 @@ func main() {
 				// release. The shared SlidingWindowLimiter applies the same
 				// math the SCEP/Intune limiter uses — extracted in Phase 4.1
 				// of this bundle so both call sites share the implementation.
-				failed := ratelimit.NewSlidingWindowLimiter(10, time.Hour, 50_000)
+				failed := ratelimit.NewLimiter(cfg.RateLimit.SlidingWindowBackend, db, 10, time.Hour, 50_000)
 				estHandler.SetSourceIPRateLimiter(failed)
 			}
 			// Phase 2.1: mTLS sibling route. When MTLSEnabled=true, build a
@@ -1588,7 +1611,7 @@ func main() {
 				mtlsHandler.SetChannelBindingRequired(profile.ChannelBindingRequired)
 				mtlsHandler.SetServerKeygenEnabled(profile.ServerKeygenEnabled)
 				if profile.RateLimitPerPrincipal24h > 0 {
-					perPrincipal := ratelimit.NewSlidingWindowLimiter(profile.RateLimitPerPrincipal24h, 24*time.Hour, 100_000)
+					perPrincipal := ratelimit.NewLimiter(cfg.RateLimit.SlidingWindowBackend, db, profile.RateLimitPerPrincipal24h, 24*time.Hour, 100_000)
 					mtlsHandler.SetPerPrincipalRateLimiter(perPrincipal)
 				}
 				estMTLSHandlers[profile.PathID] = mtlsHandler
@@ -1610,7 +1633,7 @@ func main() {
 			// when configured). The mTLS handler above gets its own
 			// limiter instance so the two routes don't share a bucket.
 			if profile.RateLimitPerPrincipal24h > 0 {
-				perPrincipal := ratelimit.NewSlidingWindowLimiter(profile.RateLimitPerPrincipal24h, 24*time.Hour, 100_000)
+				perPrincipal := ratelimit.NewLimiter(cfg.RateLimit.SlidingWindowBackend, db, profile.RateLimitPerPrincipal24h, 24*time.Hour, 100_000)
 				estHandler.SetPerPrincipalRateLimiter(perPrincipal)
 			}
 			estHandlers[profile.PathID] = estHandler

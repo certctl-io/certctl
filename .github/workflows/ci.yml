@@ -132,6 +132,18 @@ jobs:
         run: |
           go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/api/router/... ./internal/auth/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/connector/discovery/... ./internal/crypto/... ./internal/mcp/... ./internal/cli/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... ./internal/ciparity/... -count=1 -cover -coverprofile=coverage.out
 
+      - name: Multi-replica rate-limit integration test (Phase 13 Sprint 13.2/13.3 — ARCH-M1 closure proof)
+        # The falsifiable proof that CERTCTL_RATE_LIMIT_BACKEND=postgres
+        # enforces caps cluster-wide. testcontainers-go spins one
+        # Postgres container; 3 *PostgresSlidingWindowLimiter instances
+        # share it; 100 concurrent Allow("test-key") with cap=10 must
+        # see exactly 10 succeed + 90 ErrRateLimited. Failure here =
+        # the row-lock arbitration broke; ARCH-M1 closure is invalid.
+        run: |
+          go test -tags=integration -race -count=1 -timeout=300s \
+              -run TestRateLimit_PostgresBackend_CapEnforcedAcrossReplicas \
+              ./internal/integration/...
+
       - name: Check Coverage Thresholds
         # ci-pipeline-cleanup Phase 2: per-package floors moved to
         # .github/coverage-thresholds.yml. Each entry has `floor:` +

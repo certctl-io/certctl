@@ -12,6 +12,8 @@ data:
   keygen-mode: {{ .Values.server.keygen.mode | quote }}
   rate-limit-rps: {{ .Values.server.rateLimiting.rps | quote }}
   rate-limit-burst: {{ .Values.server.rateLimiting.burst | quote }}
+  rate-limit-backend: {{ .Values.server.rateLimiting.backend | default "memory" | quote }}
+  rate-limit-janitor-interval: {{ .Values.server.rateLimiting.janitorInterval | default "5m" | quote }}
   {{- if .Values.server.cors.origins }}
   cors-origins: {{ .Values.server.cors.origins | quote }}
   {{- end }}

@@ -108,6 +108,19 @@ spec:
                 configMapKeyRef:
                   name: {{ include "certctl.fullname" . }}-server
                   key: rate-limit-burst
+            # Phase 13 Sprint 13.3 (ARCH-M1) — cross-replica-consistent
+            # sliding-window rate limiter. Default memory; flip to
+            # postgres when server.replicas > 1.
+            - name: CERTCTL_RATE_LIMIT_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: rate-limit-backend
+            - name: CERTCTL_RATE_LIMIT_JANITOR_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: rate-limit-janitor-interval
             {{- if .Values.server.cors.origins }}
             - name: CERTCTL_CORS_ORIGINS
               valueFrom:

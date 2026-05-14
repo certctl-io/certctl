@@ -211,8 +211,25 @@ server:
 
   # Rate limiting configuration
   rateLimiting:
-    rps: 100      # Requests per second
-    burst: 200    # Burst capacity
+    rps: 100      # Requests per second (token-bucket middleware)
+    burst: 200    # Burst capacity (token-bucket middleware)
+
+    # Sliding-window-log rate-limit backend (Phase 13 Sprint 13.2/13.3
+    # ARCH-M1 closure). Selects the implementation backing the
+    # break-glass / OCSP / cert-export / EST limiters. See
+    # docs/operator/observability.md for the operator decision tree.
+    #
+    #   memory   — per-process (default; single-replica deploys).
+    #   postgres — cross-replica-consistent via rate_limit_buckets.
+    #              REQUIRED when server.replicas > 1 for accurate
+    #              cluster-wide enforcement.
+    backend: memory
+
+    # Scheduler janitor interval for the postgres backend's
+    # rate_limit_buckets sweep. Ignored when backend=memory (the
+    # in-memory backend self-prunes on every Allow call).
+    # Default 5m; minimum 1m.
+    janitorInterval: "5m"
 
   # Network scanning configuration
   networkScan:

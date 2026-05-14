@@ -100,13 +100,13 @@ type ESTHandler struct {
 	// EST RFC 7030 hardening Phase 3.3: per-handler source-IP rate
 	// limiter for FAILED HTTP Basic auth attempts. Keyed by sourceIP so
 	// a hostile network segment can't burn through the password.
-	failedBasicLimiter *ratelimit.SlidingWindowLimiter
+	failedBasicLimiter ratelimit.Limiter
 
 	// EST RFC 7030 hardening Phase 4.2: per-handler per-principal sliding-
 	// window rate limit. Keyed by (CSR-CN, sourceIP) so a stolen
 	// bootstrap cert AND a known device CN can't be used to flood the
 	// issuer. Disabled when nil; configured per-profile.
-	perPrincipalLimiter *ratelimit.SlidingWindowLimiter
+	perPrincipalLimiter ratelimit.Limiter
 
 	// labelForLog gives observability code a per-profile string to
 	// include in audit log lines / Prometheus labels. Defaults to
@@ -170,7 +170,7 @@ func (h *ESTHandler) SetEnrollmentPassword(pw string) { h.basicPassword = pw }
 // rate limiter. Phase 3.3. Disabled when nil — but Validate() at
 // startup refuses an enabled basic-auth profile without a configured
 // limiter, so a real deploy always wires one.
-func (h *ESTHandler) SetSourceIPRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+func (h *ESTHandler) SetSourceIPRateLimiter(l ratelimit.Limiter) {
 	h.failedBasicLimiter = l
 }
 
@@ -179,7 +179,7 @@ func (h *ESTHandler) SetSourceIPRateLimiter(l *ratelimit.SlidingWindowLimiter) {
 // every successful enrollment, NOT just failures — the goal is to
 // bound enrollment-flooding from a compromised credential, not just
 // failed-auth brute force.
-func (h *ESTHandler) SetPerPrincipalRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+func (h *ESTHandler) SetPerPrincipalRateLimiter(l ratelimit.Limiter) {
 	h.perPrincipalLimiter = l
 }
 
