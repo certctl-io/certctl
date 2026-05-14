@@ -10,6 +10,7 @@ import {
 } from '../../api/client';
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
+import Timestamp from '../../components/Timestamp';
 import ErrorState from '../../components/ErrorState';
 
 // =============================================================================
@@ -232,7 +233,7 @@ export default function BreakglassPage() {
                       >
                         <td className="py-3 font-mono text-xs">{row.actor_id}</td>
                         <td className="py-3 text-xs text-ink-muted">
-                          {new Date(row.last_password_change_at).toLocaleString()}
+                          <Timestamp iso={row.last_password_change_at} />
                         </td>
                         <td className="py-3 text-xs">
                           {row.failure_count > 0 ? (
@@ -244,7 +245,7 @@ export default function BreakglassPage() {
                         <td className="py-3 text-xs text-ink-muted">
                           {isLocked ? (
                             <span className="text-red-700">
-                              {new Date(row.locked_until!).toLocaleString()}
+                              <Timestamp iso={row.locked_until!} />
                             </span>
                           ) : (
                             '—'

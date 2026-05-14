@@ -16,6 +16,15 @@
 # corresponding line; when the allowlist is empty, this guard becomes
 # strictly enforcing and the allowlist file should be removed.
 #
+# Known false-positive class: wrap-style implicit-association labels —
+# `<label><input/>...</label>`. These ARE a11y-safe (browsers + screen
+# readers pair the wrapped input with the label automatically — no
+# htmlFor needed), but this guard's line-based regex can't tell the
+# wrap pattern apart from a sibling-label-no-htmlFor bug. When such
+# patterns ship, raise the baseline with a one-line explanation in
+# the commit message; they're benign. Phase 6 added 2 (the timestamp-
+# mode radios in AuthSettingsPage), so baseline 132 → 134.
+#
 # Algorithm:
 #   1. Count current unbound labels (labels NOT preceded by htmlFor= on
 #      the same line OR within the wrapping JSX block).

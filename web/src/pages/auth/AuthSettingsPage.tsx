@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { authBootstrapAvailable, authRuntimeConfig } from '../../api/client';
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import { STALE_TIME } from '../../api/queryConstants';
+import { getTimestampPref, setTimestampPref, type TimestampMode } from '../../api/timestampPref';
 
 // =============================================================================
 // Bundle 1 Phase 10 — AuthSettingsPage (stub).
@@ -164,6 +166,67 @@ export default function AuthSettingsPage() {
           </div>
         </section>
       )}
+
+      {/* Phase 6 closure (I18N-H3): operator timestamp-display preference. */}
+      <TimestampPreferenceCard />
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Timestamp-display preference (Phase 6 I18N-H3)
+// ──────────────────────────────────────────────────────────────────
+
+function TimestampPreferenceCard() {
+  const [mode, setMode] = useState<TimestampMode>(() => getTimestampPref().mode);
+  const [customTz, setCustomTz] = useState<string>(() => getTimestampPref().customTz);
+
+  function persist(next: { mode: TimestampMode; customTz: string }) {
+    setMode(next.mode);
+    setCustomTz(next.customTz);
+    setTimestampPref(next);
+  }
+
+  return (
+    <section className="bg-surface border border-surface-border rounded shadow-sm" data-testid="timestamp-pref-card">
+      <div className="px-4 py-3 border-b border-surface-border">
+        <div className="text-sm font-semibold">Timestamp display</div>
+        <div className="text-xs text-ink-muted">
+          Default UTC matches the server audit log byte-for-byte. Pick Local for browser time;
+          Custom for a specific IANA timezone (e.g. <code>America/New_York</code>).
+        </div>
+      </div>
+      <div className="px-4 py-3 text-sm space-y-3">
+        <div className="flex items-center gap-4">
+          {(['utc', 'local', 'custom'] as const).map((m) => (
+            <label key={m} className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="radio"
+                name="timestamp-mode"
+                value={m}
+                checked={mode === m}
+                onChange={() => persist({ mode: m, customTz })}
+                data-testid={`timestamp-mode-${m}`}
+              />
+              <span className="capitalize">{m === 'utc' ? 'UTC' : m}</span>
+            </label>
+          ))}
+        </div>
+        {mode === 'custom' && (
+          <div>
+            <label className="block text-xs font-medium text-ink-muted mb-1">IANA timezone</label>
+            <input
+              type="text"
+              value={customTz}
+              onChange={(e) => persist({ mode, customTz: e.target.value })}
+              placeholder="America/New_York"
+              spellCheck={false}
+              className="w-full px-2 py-1 border border-surface-border rounded bg-page text-ink font-mono text-xs"
+              data-testid="timestamp-custom-tz-input"
+            />
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

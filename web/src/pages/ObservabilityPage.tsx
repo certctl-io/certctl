@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getMetrics, getPrometheusMetrics, getHealth } from '../api/client';
 import PageHeader from '../components/PageHeader';
+import Timestamp from '../components/Timestamp';
 import ErrorState from '../components/ErrorState';
 
 function MetricCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -67,7 +68,7 @@ export default function ObservabilityPage() {
           </span>
           {metrics && (
             <span className="text-xs text-ink-faint ml-auto">
-              Uptime: {formatUptime(metrics.uptime.uptime_seconds)} | Started: {new Date(metrics.uptime.server_started).toLocaleString()}
+              Uptime: {formatUptime(metrics.uptime.uptime_seconds)} | Started: <Timestamp iso={metrics.uptime.server_started} />
             </span>
           )}
         </div>

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { listSessions, revokeSession, type SessionInfo } from '../../api/client';
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
+import Timestamp from '../../components/Timestamp';
 import ErrorState from '../../components/ErrorState';
 
 // =============================================================================
@@ -175,10 +176,10 @@ export default function SessionsPage() {
                     </td>
                     <td className="px-4 py-2 text-ink-muted">{s.ip_address || '—'}</td>
                     <td className="px-4 py-2 text-ink-muted">
-                      {s.last_seen_at ? new Date(s.last_seen_at).toLocaleString() : '—'}
+                      <Timestamp iso={s.last_seen_at} />
                     </td>
                     <td className="px-4 py-2 text-ink-muted">
-                      {s.absolute_expires_at ? new Date(s.absolute_expires_at).toLocaleString() : '—'}
+                      <Timestamp iso={s.absolute_expires_at} />
                     </td>
                     <td className="px-4 py-2 text-right">
                       {showRevoke && (

@@ -11,6 +11,7 @@ import {
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import { formatDate } from '../../api/utils';
 
 // =============================================================================
 // Bundle 2 Phase 8 — GroupMappingsPage.
@@ -203,7 +204,7 @@ export default function GroupMappingsPage() {
                   <td className="px-4 py-2 font-mono text-xs">{m.group_name}</td>
                   <td className="px-4 py-2 font-mono text-xs">{m.role_id}</td>
                   <td className="px-4 py-2 text-ink-muted">
-                    {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
+                    {formatDate(m.created_at)}
                   </td>
                   <td className="px-4 py-2 text-right">
                     {canEdit && (

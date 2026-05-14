@@ -11,6 +11,7 @@ import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import OIDCTestConnectionPanel from './OIDCTestConnectionPanel';
+import { formatDate } from '../../api/utils';
 
 // =============================================================================
 // Bundle 2 Phase 8 — OIDCProvidersPage.
@@ -431,7 +432,7 @@ export default function OIDCProvidersPage() {
                   <td className="px-4 py-2 text-ink-muted font-mono text-xs">{p.issuer_url}</td>
                   <td className="px-4 py-2 text-ink-muted font-mono text-xs">{p.client_id}</td>
                   <td className="px-4 py-2 text-ink-muted">
-                    {p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}
+                    {formatDate(p.created_at)}
                   </td>
                 </tr>
               ))}

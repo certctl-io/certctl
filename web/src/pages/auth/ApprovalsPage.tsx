@@ -9,6 +9,7 @@ import {
 } from '../../api/client';
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
+import Timestamp from '../../components/Timestamp';
 import ErrorState from '../../components/ErrorState';
 import { STALE_TIME } from '../../api/queryConstants';
 
@@ -375,7 +376,7 @@ export default function ApprovalsPage() {
                         {isMine && <span className="ml-2 text-amber-700">(you)</span>}
                       </td>
                       <td className="px-3 py-2 text-xs text-ink-muted">
-                        {new Date(req.created_at).toLocaleString()}
+                        <Timestamp iso={req.created_at} />
                       </td>
                       <td className="px-3 py-2">
                         {/* Audit 2026-05-11 A-5 — payload preview toggle.
