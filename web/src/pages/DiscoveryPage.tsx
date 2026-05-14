@@ -128,11 +128,38 @@ export default function DiscoveryPage() {
     refetchInterval: 30000,
   });
 
+  // P-M1 closure (frontend-design-audit 2026-05-14): always-on
+  // scans query so the "in-flight scans" panel below renders without
+  // requiring the operator to click "Show Scan History" first. The
+  // pre-P-M1 gate `enabled: showScans` made the audit's stated
+  // problem possible — an operator kicked off a scan from
+  // NetworkScanPage, navigated back to DiscoveryPage, and saw no
+  // signal that the scan was running.
+  //
+  // Refetch cadence flips between 2.5s (fast) when ANY scan is
+  // in-flight and 30s (slow) when none are. "In-flight" =
+  // completed_at is null/undefined on the DiscoveryScan record
+  // (domain.DiscoveryScan.CompletedAt is *time.Time — nil while the
+  // agent is still scanning). When the last running scan finishes,
+  // the next refetch returns it with completed_at set; the very
+  // next interval flips back to slow polling, no manual intervention.
+  //
+  // Operator chose poll over SSE/WebSocket on 2026-05-14: no new
+  // transport infrastructure to maintain; reuses the existing
+  // TanStack Query plumbing.
   const { data: scansData } = useQuery({
     queryKey: ['discovery-scans'],
     queryFn: () => getDiscoveryScans(),
-    enabled: showScans,
+    refetchInterval: (query) => {
+      const scans = (query.state.data?.data ?? []) as DiscoveryScan[];
+      const anyInFlight = scans.some((s) => !s.completed_at);
+      return anyInFlight ? 2500 : 30000;
+    },
   });
+
+  // Derive the in-flight subset for the new panel (and to gate
+  // panel visibility — empty array → panel doesn't render).
+  const inFlightScans = (scansData?.data ?? []).filter((s) => !s.completed_at);
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents-for-filter'],
@@ -299,6 +326,59 @@ export default function DiscoveryPage() {
   return (
     <>
       <PageHeader title="Certificate Discovery" subtitle={data ? `${data.total} discovered certificates` : undefined} />
+
+      {/* P-M1 closure: in-flight scan panel. Renders ABOVE the summary
+          tiles so an operator who just kicked off a scan from
+          NetworkScanPage sees immediate progress on return, without
+          having to expand "Scan History" or navigate back to
+          NetworkScanPage. Panel auto-hides when no scans are
+          in-flight; the refetchInterval on the underlying query
+          flips to 2.5s while this panel is visible so the operator
+          sees updates with sub-3-second latency. */}
+      {inFlightScans.length > 0 && (
+        <div
+          className="px-6 py-3 border-b border-surface-border/50 bg-amber-50"
+          role="status"
+          aria-live="polite"
+          data-testid="discovery-inflight-panel"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+            </span>
+            <span className="text-sm font-semibold text-amber-900">
+              {inFlightScans.length} scan{inFlightScans.length === 1 ? '' : 's'} in progress
+            </span>
+            <span className="text-xs text-amber-800/70">
+              Auto-refreshing every 2.5s while running
+            </span>
+          </div>
+          <ul className="space-y-1">
+            {inFlightScans.map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center gap-3 text-xs text-amber-900"
+                data-testid={`discovery-inflight-row-${s.id}`}
+              >
+                <span className="font-mono">{s.agent_id}</span>
+                <span className="text-amber-800/80">·</span>
+                <span className="text-amber-800/80">
+                  {s.directories?.length || 0} {s.directories?.length === 1 ? 'directory' : 'directories'}
+                </span>
+                <span className="text-amber-800/80">·</span>
+                <span className="text-amber-800/80">
+                  started {formatDateTime(s.started_at)}
+                </span>
+                <span className="text-amber-800/80">·</span>
+                <span className="text-amber-900">
+                  {s.certificates_found} found so far
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Summary stats bar */}
       {summary && (
