@@ -1217,6 +1217,313 @@ paths:
         "404": { description: User not found }
         "500": { description: Internal error }
 
+  # ════════════════════════════════════════════════════════════════════
+  # Phase 13 Sprint 13.6 (ARCH-H1 batch 3 — the final batch).
+  # 4 one-off REST endpoints + 3 OIDC browser-flow endpoints; rest-
+  # deferred bucket goes from 7 → 0 with this commit. Browser-flow
+  # endpoints model the 302+Location-header redirect contract per
+  # OAS 3.1; consumers know they are NOT standard JSON responses.
+  # ════════════════════════════════════════════════════════════════════
+
+  /api/v1/audit/export:
+    get:
+      tags: [Audit]
+      summary: Export audit events as newline-delimited JSON (NDJSON) for a date range
+      description: |
+        Permission `audit.export`. Streams every audit row inside the
+        requested `[from, to]` window as `application/x-ndjson`. Used
+        by compliance pipelines (Splunk Universal Forwarder, Elastic
+        Filebeat, Vector, etc.) that prefer line-by-line ingestion
+        over a single JSON document.
+
+        Range cap: 90 days. Requests with `to - from > 90d` return
+        400; paginate by narrower windows.
+
+        Per-record cap: `limit` query parameter (default 50000;
+        accepted range 1..100000). Values outside the range silently
+        clamp to default.
+
+        The export itself is recursively audited: every successful
+        export emits an `audit.export` event capturing actor, range,
+        category, and row count so the audit log records who pulled
+        which compliance evidence and when.
+      operationId: exportAudit
+      parameters:
+        - in: query
+          name: from
+          required: true
+          schema: { type: string, format: date-time }
+          description: RFC 3339 start of the export window (inclusive).
+        - in: query
+          name: to
+          required: true
+          schema: { type: string, format: date-time }
+          description: RFC 3339 end of the export window (exclusive). Must be strictly after `from`.
+        - in: query
+          name: category
+          required: false
+          schema:
+            type: string
+            enum: [cert_lifecycle, auth, config]
+          description: Optional category filter. Omit to return every event in the window.
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100000 }
+          description: Maximum rows to stream (default 50000; out-of-range values clamp to default).
+      responses:
+        "200":
+          description: NDJSON stream of AuditEvent rows
+          headers:
+            Content-Disposition:
+              description: Attachment hint suggesting filename `certctl-audit-<from>_to_<to>.ndjson`.
+              schema: { type: string }
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                description: |
+                  One JSON-encoded AuditEvent per line (see
+                  `#/components/schemas/AuditEvent`). The body is a
+                  byte stream, not a single JSON document; clients
+                  parse line-by-line.
+        "400": { description: Missing/invalid date params, range exceeds 90 days, invalid category, etc. }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "405": { description: Method not allowed (only GET is accepted) }
+        "500": { description: Internal error (export failed mid-query) }
+
+  /api/v1/auth/demo-residual/cleanup:
+    post:
+      tags: [Auth]
+      summary: Remove residual `actor-demo-anon` role grants after exiting demo mode
+      description: |
+        Permission `auth.role.assign` (admin-class). Removes the
+        leftover `actor_roles` rows for the synthetic `actor-demo-anon`
+        actor after the operator has flipped `CERTCTL_AUTH_TYPE` away
+        from `none` (demo mode). Idempotent: subsequent invocations
+        return `removed: 0`.
+
+        Refuses (503) when the server is currently in demo mode —
+        the `actor-demo-anon` grants ARE the active runtime state at
+        `auth_type=none`, so "cleaning them up" would lock the operator
+        out of the live admin surface. The GUI hides the action button
+        when `/api/v1/auth/info` reports `auth_type=none`; this guard
+        is defense-in-depth.
+      operationId: cleanupDemoResidualGrants
+      responses:
+        "200":
+          description: Cleanup complete (count returned)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemoResidualCleanupResponse"
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal error (cleanup not configured or failed mid-delete) }
+        "503": { description: Refused — server is currently in demo mode (CERTCTL_AUTH_TYPE=none) }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the caller's current session
+      description: |
+        Auth-exempt at the router (the session cookie is validated
+        inside the handler). Reads `certctl_session` cookie, validates
+        + revokes the underlying session row, rotates the CSRF token
+        on the actor's other sessions (Audit 2026-05-11 Fix 13 / HIGH-2
+        fourth call site), clears the session + CSRF cookies, returns
+        204.
+
+        Idempotent: when no valid session cookie is presented the
+        handler clears any stale cookies and returns 204 without
+        side-effects.
+      operationId: logoutCurrentSession
+      security: []
+      responses:
+        "204": { description: Session revoked (or none to revoke — idempotent) }
+        "500": { description: Internal error during revoke }
+
+  /auth/breakglass/login:
+    post:
+      tags: [Auth]
+      summary: Local password login for emergency admin recovery
+      description: |
+        Auth-bypass — the whole point is to log in WITHOUT existing
+        certctl credentials. On success, sets the post-login session
+        cookie + CSRF cookie and returns 204. On any failure (wrong
+        password, locked account, no credential, unknown actor):
+        uniform 401 + identical timing (no scanner-friendly
+        distinction).
+
+        Returns 404 when `CERTCTL_BREAKGLASS_ENABLED=false` (surface
+        invisibility — Phase 7.5 spec).
+
+        Rate-limited per source IP (default 5 attempts/min/IP;
+        configurable via `CERTCTL_RATE_LIMIT_BACKEND` + the
+        constructor in cmd/server/main.go). Exceeded budget returns
+        429 with no body.
+      operationId: breakglassLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BreakglassLoginRequest"
+      responses:
+        "204":
+          description: Authenticated — Set-Cookie carries the new session + CSRF tokens
+          headers:
+            Set-Cookie:
+              description: |
+                Two `Set-Cookie` headers are emitted on success: the
+                post-login session cookie (`certctl_session`, HttpOnly)
+                and the CSRF token cookie (`certctl_csrf`, NOT HttpOnly
+                so the GUI can read it to echo in `X-CSRF-Token`).
+              schema: { type: string }
+        "401": { description: Authentication failed (uniform — covers wrong password, missing credential, unknown actor; identical timing) }
+        "404": { description: Break-glass disabled (CERTCTL_BREAKGLASS_ENABLED=false) }
+        "429": { description: Rate limit exceeded (per source IP) }
+        "500": { description: Internal error during authenticate }
+
+  /auth/oidc/login:
+    get:
+      tags: [Auth]
+      summary: Browser-flow — start an OIDC login; 302 to IdP authorization URL
+      description: |
+        Auth-exempt — pre-auth by definition. Browser-flow endpoint:
+        the response is a 302 with `Location:` pointing at the
+        configured provider's authorization URL, NOT a JSON response.
+        Consumers MUST follow the redirect for the flow to complete.
+
+        On success: persists a pre-login row capturing the state +
+        nonce + PKCE-S256 verifier, sets the `certctl_oidc_pending`
+        cookie (HttpOnly, SameSite=Lax, 10-minute lifetime, `__Host-`
+        prefix), and 302-redirects to the IdP. The cookie is consumed
+        + cleared by `/auth/oidc/callback`.
+
+        Audit 2026-05-10 MED-16 — the pre-login row captures the
+        client IP + User-Agent at this step so the callback handler
+        can reject a stolen cookie replayed from a different browser
+        or source.
+      operationId: oidcLoginInitiate
+      security: []
+      parameters:
+        - in: query
+          name: provider
+          required: true
+          schema: { type: string }
+          description: OIDC provider ID (one of the rows under `/api/v1/auth/oidc/providers`).
+      responses:
+        "302":
+          description: Redirect to the IdP's authorization URL
+          headers:
+            Location:
+              description: IdP authorization URL (provider-specific, includes state + nonce + PKCE challenge).
+              schema: { type: string, format: uri }
+            Set-Cookie:
+              description: The `certctl_oidc_pending` pre-login cookie.
+              schema: { type: string }
+        "400": { description: Missing `provider` query parameter }
+        "404": { description: Provider not found }
+        "500": { description: IdP discovery fetch failed, downgrade-defense tripped, or internal crypto failure }
+
+  /auth/oidc/callback:
+    get:
+      tags: [Auth]
+      summary: Browser-flow — consume IdP authorization response; 302 to post-login URL
+      description: |
+        Auth-exempt — pre-auth by definition (the cookie + state are
+        validated inside the handler). Browser-flow endpoint: the
+        success response is a 302 with `Location:` pointing at the
+        configured `postLoginURL` (default `/`), NOT a JSON response.
+
+        Reads the `certctl_oidc_pending` pre-login cookie, drives the
+        OIDC service's 11-step token validation (sig + iss + aud +
+        nonce + at_hash + iat + jti + sub + group-claim resolution +
+        role-mapping + user-upsert), mints a post-login session,
+        deletes the pre-login cookie, sets the post-login session +
+        CSRF cookies, and 302's to the dashboard.
+
+        Failure responses are ALSO 302 — to `/login?error=oidc_failed&reason=<category>`
+        — so the SPA can render an operator-friendly alert without
+        the browser seeing a raw 400. The audit row carries the
+        specific failure category server-side.
+      operationId: oidcLoginCallback
+      security: []
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+          description: OAuth2 authorization code returned by the IdP.
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+          description: Opaque state value the certctl `/auth/oidc/login` step embedded into the IdP URL.
+        - in: query
+          name: iss
+          required: false
+          schema: { type: string }
+          description: RFC 9207 `iss` URL parameter. Preserved byte-strict for the service-layer compare against the matched provider's `IssuerURL`. The IdP emits this only when advertised in its discovery doc; the service-layer check is a no-op otherwise.
+      responses:
+        "302":
+          description: Redirect — either to `postLoginURL` on success OR to `/login?error=oidc_failed&reason=<category>` on validation failure
+          headers:
+            Location:
+              description: Either the configured `postLoginURL` (success) or `/login?error=oidc_failed&reason=<category>` (failure).
+              schema: { type: string, format: uri-reference }
+            Set-Cookie:
+              description: On success — two `Set-Cookie` headers carrying the post-login session + CSRF tokens. On failure — a single `Set-Cookie` clearing the pre-login cookie.
+              schema: { type: string }
+        "400": { description: Missing `code`/`state` query parameter, or missing pre-login cookie }
+
+  /auth/oidc/back-channel-logout:
+    post:
+      tags: [Auth]
+      summary: IdP-initiated session revocation via OIDC Back-Channel Logout 1.0
+      description: |
+        Auth via the IdP-signed `logout_token` JWT in the form body —
+        NOT certctl-issued credentials, so `security: []`. Spec
+        reference: OpenID Connect Back-Channel Logout 1.0 §2.6.
+
+        Validates the logout token against the matched provider's
+        JWKS (signature + alg-allowlist + iat-skew window + jti
+        consumed-set + required claims: iss, aud, iat, jti, events;
+        exactly one of sub or sid; nonce MUST be absent), revokes
+        every matching session, returns 200 with `Cache-Control:
+        no-store`.
+
+        Any validation failure returns 400 — uniform wire shape per
+        spec §2.6. The audit row carries the specific reason.
+        Replayed jti (RFC 9700 §2.7) returns 200 with audit
+        outcome=jti_replayed (idempotent re-receive of a logout
+        is harmless).
+      operationId: oidcBackChannelLogout
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [logout_token]
+              properties:
+                logout_token:
+                  type: string
+                  description: IdP-signed logout_token JWT per OpenID Connect Back-Channel Logout 1.0 §2.4.
+      responses:
+        "200":
+          description: Logout token accepted; matching sessions revoked
+          headers:
+            Cache-Control:
+              description: Always `no-store` per spec.
+              schema: { type: string, enum: [no-store] }
+        "400": { description: logout_token validation failed (signature, iss, aud, iat-window, jti consumed-set, required claims, etc.) — uniform per spec §2.6 }
+        "503": { description: Transient repository error on jti consumed-set write — IdP should retry per its own semantics }
+
   /api/v1/auth/runtime-config:
     get:
       tags: [Auth]
@@ -7411,3 +7718,37 @@ components:
           format: date-time
           nullable: true
           description: RFC 3339 UTC timestamp the user was deactivated. Omitted when the user is active.
+
+    # ════════════════════════════════════════════════════════════════════
+    # Phase 13 Sprint 13.6 (ARCH-H1 batch 3 — final batch) schemas.
+    # ════════════════════════════════════════════════════════════════════
+
+    DemoResidualCleanupResponse:
+      type: object
+      description: |
+        Mirrors internal/api/handler/demo_residual.go::
+        demoResidualCleanupResponse. Always present; idempotent re-runs
+        return `removed: 0`.
+      required: [removed]
+      properties:
+        removed:
+          type: integer
+          format: int64
+          description: Number of `actor_roles` rows removed in this cleanup call.
+
+    BreakglassLoginRequest:
+      type: object
+      description: |
+        Mirrors internal/api/handler/auth_breakglass.go::
+        breakglassLoginRequest. Plaintext password on the wire ONLY at
+        login-time; the service hashes via Argon2id for the
+        constant-time compare.
+      required: [actor_id, password]
+      properties:
+        actor_id:
+          type: string
+          description: Actor attempting recovery login.
+        password:
+          type: string
+          format: password
+          description: Plaintext password (Argon2id-hashed at rest by the service).

@@ -41,13 +41,13 @@
 # ──────────────────────────────────────────────────────────────────────
 #
 # Current split, re-derived by the parity script's bucket-reporting
-# subcommand (post-Sprint-13.5 / 2026-05-14):
+# subcommand (post-Sprint-13.6 / 2026-05-14):
 #
-#   total entries:           43
+#   total entries:           36
 #   wire-protocol:           36
-#   rest-deferred:           7
+#   rest-deferred:           0    ← THE FLOOR — ARCH-H1 substantive close
 #
-# Burn-down progress + remaining plan for the rest-deferred bucket:
+# Burn-down progress:
 #
 #   Sprint 13.4 SHIPPED — 28 - 13 = 15 (auth/sessions cluster 3 ops +
 #                               auth/oidc CRUD + JWKS + test + refresh
@@ -55,13 +55,15 @@
 #   Sprint 13.5 SHIPPED — 15 -  8 =  7 (auth/breakglass admin 4 ops +
 #                               auth/users 3 ops + auth/runtime-config
 #                               1 op, 8 ops total)
-#   Sprint 13.6 →  7 -  7 =  0 (audit/export + demo-residual + 3
-#                               OIDC browser flows + auth/logout +
-#                               auth/breakglass/login, 7 ops)
+#   Sprint 13.6 SHIPPED —  7 -  7 =  0 (audit/export 1 op + demo-
+#                               residual/cleanup 1 op + auth/logout 1 op +
+#                               auth/breakglass/login 1 op + 3 OIDC
+#                               browser-flow endpoints, 7 ops total)
 #
-# Sprint 13.7 then tightens the parity-script's rest-deferred floor
+# Sprint 13.7 next tightens the parity-script's rest-deferred floor
 # from monotonic-decrease to a hard zero-exact pin. After that, any
-# new REST route MUST land with an OpenAPI op or fail CI.
+# new REST route MUST land with an OpenAPI op or fail CI — no escape
+# hatch via `category: rest-deferred`.
 #
 # Each authored OpenAPI op needs request/response schemas (not
 # placeholders) so the generated client at web/orval.config.ts emits
@@ -197,24 +199,3 @@ documented_exceptions:
   # stays green for the v2.1.0 release tag. Threat model + handler contracts
   # live in docs/operator/{rbac.md,auth-threat-model.md,oidc-runbooks/*}.
   # =============================================================================
-  - route: "GET /auth/oidc/login"
-    why: "Bundle 2 Phase 5 OIDC login redirect; user-facing 302 with state cookie. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "GET /auth/oidc/callback"
-    why: "Bundle 2 Phase 5 OIDC callback handler; RFC 9700 §4.7.1 + RFC 9207. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "POST /auth/logout"
-    why: "Bundle 2 Phase 5 cookie + CSRF revoker. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "POST /auth/breakglass/login"
-    why: "Bundle 2 Phase 7.5 public break-glass login (auth-bypass, 404 when disabled). OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "POST /auth/oidc/back-channel-logout"
-    why: "Bundle 2 Phase 5 RFC OIDC Back-Channel Logout 1.0 endpoint. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/demo-residual/cleanup"
-    why: "Audit 2026-05-11 A-8 demo-mode residual-grants cleanup endpoint."
-    category: rest-deferred
-  - route: "GET /api/v1/audit/export"
-    why: "Bundle 1 Phase 8 streaming NDJSON audit export."
-    category: rest-deferred
