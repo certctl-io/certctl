@@ -77,8 +77,24 @@ func New(config *Config, logger *slog.Logger) *Connector {
 	return c
 }
 
+// Phase 7 SEC-H2 closure (2026-05-14): argv-form exec instead of
+// `sh -c`. See nginx connector's defaultRunCommand for the
+// rationale + threat model.
+//
+// Postfix-specific note: the canonical reload command is `postfix
+// reload` (or `systemctl reload postfix`), which is simple argv —
+// no shell features needed. Operators historically using
+// pipeline-style commands (e.g. "postfix reload && systemctl is-active
+// postfix") were rejected at config-time by ValidateShellCommand
+// even before Phase 7 (the `&` metachar was on the deny list); the
+// argv form just makes that rejection consistent between config
+// validation and exec.
 func defaultRunCommand(ctx context.Context, command string) ([]byte, error) {
-	return exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
+	argv, err := validation.SplitShellCommand(command)
+	if err != nil {
+		return nil, fmt.Errorf("invalid reload/validate command: %w", err)
+	}
+	return exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput()
 }
 
 func (c *Connector) SetTestRunValidate(fn func(ctx context.Context, command string) ([]byte, error)) {

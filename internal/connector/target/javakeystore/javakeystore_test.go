@@ -425,8 +425,15 @@ func TestDeployCertificate_WithReload(t *testing.T) {
 		t.Fatalf("expected 2 calls (import, reload), got %d", len(mock.calls))
 	}
 	reloadCall := mock.calls[1]
-	if reloadCall.Name != "sh" {
-		t.Errorf("expected sh for reload, got: %s", reloadCall.Name)
+	// Phase 7 SEC-H2 (2026-05-14): pre-Phase-7 the executor was
+	// invoked as `sh -c "systemctl restart tomcat"`. Post-Phase-7
+	// the command splits to argv ["systemctl", "restart", "tomcat"]
+	// and executes directly without a shell. Pin the new shape.
+	if reloadCall.Name != "systemctl" {
+		t.Errorf("expected systemctl for reload (argv-form, post-Phase-7), got: %s", reloadCall.Name)
+	}
+	if len(reloadCall.Args) != 2 || reloadCall.Args[0] != "restart" || reloadCall.Args[1] != "tomcat" {
+		t.Errorf("expected args [restart tomcat], got: %v", reloadCall.Args)
 	}
 }
 

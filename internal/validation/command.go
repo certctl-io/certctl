@@ -46,6 +46,43 @@ func ValidateShellCommand(cmd string) error {
 	return nil
 }
 
+// SplitShellCommand validates the command via ValidateShellCommand and
+// returns the whitespace-separated argv slice. Used by target
+// connectors that need to exec a reload / validate command without
+// going through `sh -c`.
+//
+// Phase 7 SEC-H2 closure (2026-05-14): the existing
+// ValidateShellCommand path already rejects every shell metacharacter
+// that would require shell parsing — single + double quotes,
+// backslash, dollar, backtick, semicolon, pipe, ampersand, parens,
+// braces, redirects, NUL and CR/LF —
+// so a post-validation strings.Fields split is sufficient — the
+// remaining whitespace splitting cannot smuggle injection because
+// the input is already metacharacter-free.
+//
+// Callers MUST use the argv output with exec.Command(argv[0],
+// argv[1:]...) — NOT pass argv elements back through sh -c. The
+// argv form is what eliminates the injection vector; this helper's
+// contract is "you got an argv, now use it as argv."
+//
+// Returns:
+//   - argv (length ≥ 1) on success
+//   - error if ValidateShellCommand rejects the input or the
+//     post-split argv is empty (e.g. whitespace-only input)
+func SplitShellCommand(cmd string) ([]string, error) {
+	if err := ValidateShellCommand(cmd); err != nil {
+		return nil, err
+	}
+	// ValidateShellCommand rejected every quote / escape character;
+	// strings.Fields is now safe — it splits on whitespace and
+	// produces no surprising tokens because there's nothing to quote.
+	argv := strings.Fields(cmd)
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("command is whitespace-only after split")
+	}
+	return argv, nil
+}
+
 // ValidateDomainName validates a domain name against RFC 1123 with support for wildcards.
 // Valid domain names contain only:
 // - Alphanumeric characters (a-z, A-Z, 0-9)

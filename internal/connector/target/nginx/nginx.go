@@ -149,12 +149,24 @@ func New(config *Config, logger *slog.Logger) *Connector {
 }
 
 // defaultRunCommand wraps exec.CommandContext for the production
-// path. Tests override this via the test-seam fields. The shell
-// invocation goes through `sh -c` to support the operator's
-// existing config patterns (e.g. "systemctl reload nginx",
-// "nginx -t -c /etc/nginx/nginx.conf").
+// path. Tests override this via the test-seam fields.
+//
+// Phase 7 SEC-H2 closure (2026-05-14): pre-Phase-7 this used
+// exec.CommandContext(ctx, "sh", "-c", command) — the
+// internal/validation/command.go config-time guard rejected
+// metacharacters but the exec call itself still spawned a shell.
+// Post-Phase-7 the command is split into argv via
+// validation.SplitShellCommand (which re-validates the metachar
+// allowlist as defense-in-depth) and exec'd directly without a
+// shell. The operator's config patterns ("systemctl reload nginx",
+// "nginx -t -c /etc/nginx/nginx.conf") work identically — they
+// don't need shell features, just argv.
 func defaultRunCommand(ctx context.Context, command string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	argv, err := validation.SplitShellCommand(command)
+	if err != nil {
+		return nil, fmt.Errorf("invalid reload/validate command: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	return cmd.CombinedOutput()
 }
 

@@ -361,10 +361,24 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	}
 
 	// Step 5: Optional reload command
+	//
+	// Phase 7 SEC-H2 closure (2026-05-14): argv-form exec instead
+	// of `sh -c`. See nginx connector's defaultRunCommand for the
+	// shared rationale. ValidateShellCommand was already called at
+	// config-time (line 178 above); SplitShellCommand re-validates
+	// here as defense-in-depth and produces the argv for
+	// executor.Execute(name, args...) — note the executor's
+	// signature was already variadic-args, so the migration was
+	// purely "split and unpack."
 	if c.config.ReloadCommand != "" {
-		output, err := c.executor.Execute(ctx, "sh", "-c", c.config.ReloadCommand)
+		argv, err := validation.SplitShellCommand(c.config.ReloadCommand)
 		if err != nil {
-			c.logger.Warn("reload command failed (non-fatal)", "error", err, "output", output)
+			c.logger.Warn("reload command failed validation (non-fatal)", "error", err)
+		} else {
+			output, runErr := c.executor.Execute(ctx, argv[0], argv[1:]...)
+			if runErr != nil {
+				c.logger.Warn("reload command failed (non-fatal)", "error", runErr, "output", output)
+			}
 		}
 	}
 
