@@ -216,13 +216,13 @@ function ProfileSummaryCard({ profile, onRequestReload }: ProfileSummaryCardProp
       </header>
 
       <div className="flex flex-wrap gap-2 mb-3" data-testid={`est-profile-badges-${profile.path_id}`}>
-        <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.mtls_enabled)}`}>
+        <span className={`text-xs uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.mtls_enabled)}`}>
           mTLS {profile.mtls_enabled ? 'enabled' : 'disabled'}
         </span>
-        <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.basic_auth_configured)}`}>
+        <span className={`text-xs uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.basic_auth_configured)}`}>
           HTTP Basic {profile.basic_auth_configured ? 'configured' : 'not set'}
         </span>
-        <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.server_keygen_enabled)}`}>
+        <span className={`text-xs uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.server_keygen_enabled)}`}>
           Server-keygen {profile.server_keygen_enabled ? 'enabled' : 'disabled'}
         </span>
       </div>
@@ -233,7 +233,7 @@ function ProfileSummaryCard({ profile, onRequestReload }: ProfileSummaryCardProp
           const value = profile.counters?.[label] ?? 0;
           return (
             <div key={label} className="bg-surface-alt rounded px-3 py-2" data-testid={`est-counter-${profile.path_id}-${label}`}>
-              <div className="text-[10px] uppercase tracking-wide text-ink-muted">{presentation.label}</div>
+              <div className="text-2xs uppercase tracking-wide text-ink-muted">{presentation.label}</div>
               <div className={`text-base font-semibold ${TONE_CLASS[presentation.tone]}`}>{value}</div>
             </div>
           );
@@ -241,7 +241,7 @@ function ProfileSummaryCard({ profile, onRequestReload }: ProfileSummaryCardProp
       </div>
 
       {profile.mtls_enabled && profile.trust_anchor_path && (
-        <p className="text-[11px] text-ink-muted font-mono mb-2">
+        <p className="text-xs text-ink-muted font-mono mb-2">
           Trust bundle: {profile.trust_anchor_path}
         </p>
       )}

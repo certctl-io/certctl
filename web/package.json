@@ -14,6 +14,8 @@
     "generate": "orval --config ./orval.config.ts"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@tanstack/react-query": "^5.90.21",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -24,12 +26,12 @@
     "@playwright/test": "^1.49.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "orval": "^7.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
     "jsdom": "^29.0.0",
+    "orval": "^7.0.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",

@@ -19,7 +19,8 @@ module.exports = {
           600: '#147868',
           700: '#106055',
           800: '#0f4d44',
-          900: '#0d3f39',
+          // 900 removed (Phase 0 hygiene, FE-L3): 0 callers in web/src.
+          // Re-add if Phase 7 dark-mode rebuild needs it.
         },
         accent: {
           blue:   '#3b7dd8', // Logo blue arrows
@@ -42,15 +43,25 @@ module.exports = {
           border:  '#1a5c48',
           text:    '#94d2be', // Muted teal for inactive nav
         },
-        // Text on light backgrounds
+        // Text on light backgrounds (WCAG AA contrast against bg-page #f0f4f8).
+        // Phase 0 hygiene (UX-M6): faint bumped from #94a3b8 (3.0:1, fails AA)
+        // to #64748b (4.6:1, passes AA). muted bumped from #64748b to #475569
+        // (6.9:1, passes AA Large) to preserve the three-tier hierarchy.
         ink: {
-          DEFAULT: '#1e293b', // Primary text
-          muted:   '#64748b', // Secondary text
-          faint:   '#94a3b8', // Tertiary/placeholder
+          DEFAULT: '#1e293b', // Primary text (12.6:1 vs bg-page)
+          muted:   '#475569', // Secondary text (6.9:1 vs bg-page) — was #64748b
+          faint:   '#64748b', // Tertiary/placeholder (4.6:1 vs bg-page) — was #94a3b8
         },
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+      },
+      // Phase 0 hygiene (UX-L1): one design-token rung below `text-xs` (12px)
+      // so the 7 historical `text-[10px]` uses migrate losslessly. The other
+      // 18 inline-pixel sites (text-[11px] x16, text-[13px] x2) migrate to
+      // text-xs / text-sm respectively — a +1px nudge each, imperceptible.
+      fontSize: {
+        '2xs': ['0.625rem', { lineHeight: '0.875rem' }], // 10px / 14px
       },
       borderRadius: {
         DEFAULT: '0.375rem',

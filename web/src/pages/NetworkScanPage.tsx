@@ -382,7 +382,7 @@ function SCEPProbeResultPanel({ result }: { result: SCEPProbeResult }) {
         <span>{formatDateTime(result.probed_at)} · {result.probe_duration_ms}ms</span>
       </div>
       {result.error && (
-        <p className="font-mono text-[11px] mb-2">Error: {result.error}</p>
+        <p className="font-mono text-xs mb-2">Error: {result.error}</p>
       )}
       {result.reachable && (
         <>
@@ -397,9 +397,9 @@ function SCEPProbeResultPanel({ result }: { result: SCEPProbeResult }) {
           {result.ca_cert_subject && (
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2">
               <dt className="font-semibold">CA cert subject:</dt>
-              <dd className="font-mono text-[11px]">{result.ca_cert_subject}</dd>
+              <dd className="font-mono text-xs">{result.ca_cert_subject}</dd>
               <dt className="font-semibold">Issuer:</dt>
-              <dd className="font-mono text-[11px]">{result.ca_cert_issuer}</dd>
+              <dd className="font-mono text-xs">{result.ca_cert_issuer}</dd>
               <dt className="font-semibold">Algorithm:</dt>
               <dd>{result.ca_cert_algorithm || '(unknown)'}</dd>
               <dt className="font-semibold">Chain length:</dt>
@@ -417,7 +417,7 @@ function SCEPProbeResultPanel({ result }: { result: SCEPProbeResult }) {
             </dl>
           )}
           {result.advertised_caps && result.advertised_caps.length > 0 && (
-            <p className="mt-2 text-[11px]">
+            <p className="mt-2 text-xs">
               Raw caps: <code>{result.advertised_caps.join(', ')}</code>
             </p>
           )}
@@ -430,7 +430,7 @@ function SCEPProbeResultPanel({ result }: { result: SCEPProbeResult }) {
 function CapBadge({ label, supported }: { label: string; supported: boolean }) {
   return (
     <span
-      className={`text-[11px] uppercase px-2 py-0.5 rounded border ${
+      className={`text-xs uppercase px-2 py-0.5 rounded border ${
         supported ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-gray-100 text-gray-600 border-gray-300'
       }`}
       data-testid={`scep-probe-cap-${label.toLowerCase().replace(/\W/g, '-')}`}

@@ -1,3 +1,12 @@
+// Phase 0 hygiene (FE-H4 / PERF-H3): self-hosted fonts. Replaces the
+// Google Fonts @import that used to live at the top of src/index.css —
+// Vite hashes + bundles these CSS files into web/dist on build, so cold
+// loads no longer touch fonts.googleapis.com / fonts.gstatic.com.
+import '@fontsource-variable/inter';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/600.css';
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';

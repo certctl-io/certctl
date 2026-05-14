@@ -83,7 +83,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
         <thead>
           <tr className="border-b-2 border-surface-border bg-surface-muted">
             {selectable && (
-              <th className="px-3 py-3 w-10">
+              <th scope="col" className="px-3 py-3 w-10">
                 <input
                   type="checkbox"
                   checked={allSelected || false}
@@ -93,7 +93,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
               </th>
             )}
             {columns.map(col => (
-              <th key={col.key} className={`px-4 py-3 text-left text-xs font-semibold text-ink-muted uppercase tracking-wider ${col.className || ''}`}>
+              <th key={col.key} scope="col" className={`px-4 py-3 text-left text-xs font-semibold text-ink-muted uppercase tracking-wider ${col.className || ''}`}>
                 {col.label}
               </th>
             ))}

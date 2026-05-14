@@ -207,13 +207,13 @@ function ProfileSummaryCard({ profile, onViewIntuneDetails }: ProfileSummaryCard
       </header>
 
       <div className="flex flex-wrap gap-2 mb-3" data-testid={`profile-badges-${profile.path_id}`}>
-        <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.challenge_password_set)}`}>
+        <span className={`text-xs uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.challenge_password_set)}`}>
           Challenge password{profile.challenge_password_set ? ' set' : ' MISSING'}
         </span>
-        <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.mtls_enabled)}`}>
+        <span className={`text-xs uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(profile.mtls_enabled)}`}>
           mTLS {profile.mtls_enabled ? 'enabled' : 'disabled'}
         </span>
-        <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(intuneEnabled)}`}>
+        <span className={`text-xs uppercase tracking-wide px-2 py-0.5 rounded border ${pillClass(intuneEnabled)}`}>
           Intune {intuneEnabled ? 'enabled' : 'disabled'}
         </span>
       </div>
@@ -221,7 +221,7 @@ function ProfileSummaryCard({ profile, onViewIntuneDetails }: ProfileSummaryCard
       <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-ink-muted">
         <div>
           <dt className="font-semibold text-ink">RA cert subject</dt>
-          <dd className="font-mono text-[11px]">{profile.ra_cert_subject || '(not loaded)'}</dd>
+          <dd className="font-mono text-xs">{profile.ra_cert_subject || '(not loaded)'}</dd>
         </div>
         {profile.ra_cert_not_after && (
           <div>
@@ -232,7 +232,7 @@ function ProfileSummaryCard({ profile, onViewIntuneDetails }: ProfileSummaryCard
         {profile.mtls_enabled && profile.mtls_trust_bundle_path && (
           <div>
             <dt className="font-semibold text-ink">mTLS trust bundle</dt>
-            <dd className="font-mono text-[11px]">{profile.mtls_trust_bundle_path}</dd>
+            <dd className="font-mono text-xs">{profile.mtls_trust_bundle_path}</dd>
           </div>
         )}
       </dl>
@@ -416,7 +416,7 @@ function IntuneProfileCard({ profile, onRequestReload, highlighted }: IntuneProf
               <div className={`text-lg font-semibold ${TONE_CLASS[presentation.tone]}`} data-testid={`counter-${profile.path_id}-${label}`}>
                 {value}
               </div>
-              <div className="text-[11px] text-ink-muted uppercase tracking-wide">{presentation.label}</div>
+              <div className="text-xs text-ink-muted uppercase tracking-wide">{presentation.label}</div>
             </div>
           );
         })}
@@ -442,7 +442,7 @@ function IntuneProfileCard({ profile, onRequestReload, highlighted }: IntuneProf
           <summary className="cursor-pointer font-semibold text-ink">Trust anchor details</summary>
           <table className="mt-2 w-full text-left">
             <thead>
-              <tr className="text-[11px] text-ink-muted uppercase">
+              <tr className="text-xs text-ink-muted uppercase">
                 <th className="py-1 pr-2">Subject</th>
                 <th className="py-1 pr-2">Not after</th>
                 <th className="py-1">Days to expiry</th>

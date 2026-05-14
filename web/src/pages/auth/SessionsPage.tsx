@@ -166,7 +166,7 @@ export default function SessionsPage() {
                       <span className="ml-1 text-ink-muted">({s.actor_type})</span>
                       {isOwn && (
                         <span
-                          className="ml-2 inline-block px-1.5 py-0.5 text-[10px] rounded bg-brand-50 text-brand-700"
+                          className="ml-2 inline-block px-1.5 py-0.5 text-2xs rounded bg-brand-50 text-brand-700"
                           data-testid={`session-self-pill-${s.id}`}
                         >
                           you

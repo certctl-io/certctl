@@ -195,7 +195,7 @@ export default function DiscoveryPage() {
         const badge = sourceTypeBadge(c.agent_id);
         return (
           <div>
-            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.style} mr-1`}>{badge.label}</span>
+            <span className={`inline-block px-1.5 py-0.5 rounded text-2xs font-medium ${badge.style} mr-1`}>{badge.label}</span>
             <div className="text-xs text-ink-faint truncate max-w-[180px] mt-0.5" title={c.source_path}>{c.source_path}</div>
           </div>
         );
@@ -218,7 +218,7 @@ export default function DiscoveryPage() {
         <div className="flex items-center gap-1">
           <span className="text-xs text-ink-muted">{c.key_algorithm}{c.key_size ? ` ${c.key_size}` : ''}</span>
           {c.is_ca && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">CA</span>
+            <span className="text-2xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">CA</span>
           )}
         </div>
       ),
@@ -226,7 +226,7 @@ export default function DiscoveryPage() {
     {
       key: 'fingerprint',
       label: 'Fingerprint',
-      render: (c) => <span className="font-mono text-[10px] text-ink-faint">{c.fingerprint_sha256?.substring(0, 16)}...</span>,
+      render: (c) => <span className="font-mono text-2xs text-ink-faint">{c.fingerprint_sha256?.substring(0, 16)}...</span>,
     },
     {
       key: 'actions',

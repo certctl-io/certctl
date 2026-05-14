@@ -1,4 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/*
+ * Phase 0 hygiene (FE-H4 / PERF-H3): Inter + JetBrains Mono are now
+ * self-hosted via the @fontsource* packages, imported at the top of
+ * web/src/main.tsx so Vite can hash + bundle the font files. The old
+ * Google Fonts @import lived here and produced two cross-origin font
+ * requests on every cold load; those are gone and PERF-H3's
+ * preconnect/dns-prefetch suggestion collapses (no external host left
+ * to preconnect to).
+ */
 
 @tailwind base;
 @tailwind components;
@@ -7,7 +15,11 @@
 @layer base {
   body {
     @apply bg-page text-ink antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    /* Phase 0 hygiene (FE-H4): "Inter Variable" is the family name
+       registered by @fontsource-variable/inter (single woff2 covering
+       wght 100-900). Keep "Inter" as a fallback for older browsers /
+       any pinned local install. */
+    font-family: 'Inter Variable', 'Inter', system-ui, -apple-system, sans-serif;
   }
 }
 
@@ -49,5 +61,81 @@
   /* Stat cards with colored top borders */
   .stat-card {
     @apply bg-surface border border-surface-border rounded-md shadow-sm p-5 border-t-4;
+  }
+}
+
+/*
+ * Phase 0 hygiene (UX-L2): honour prefers-reduced-motion. Users who
+ * opt out of animation at the OS level get effectively-instant
+ * transitions on every animated element (badges, modals, toggles).
+ * 0.01ms is the conventional non-zero value — fully zero can break
+ * libraries that observe transitionend events.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Phase 0 hygiene (UX-L3): a baseline print stylesheet. Hides the
+ * sidebar + top action bars, removes card shadows, expands content
+ * to full width, and keeps table rows intact across page breaks.
+ * Operator-facing — operators print certificate detail pages and
+ * audit-log exports for compliance archives.
+ */
+@media print {
+  /* Drop sidebar / nav chrome — only the content matters in print. */
+  aside,
+  nav,
+  [role="navigation"],
+  .no-print {
+    display: none !important;
+  }
+
+  /* Full-width content, no shadows, plain backgrounds (ink saving). */
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  main,
+  .card,
+  .stat-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border-color: #cbd5e1 !important;
+    page-break-inside: avoid;
+  }
+
+  /* Tables: prevent mid-row breaks, repeat headers on each page. */
+  table {
+    width: 100% !important;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tr,
+  td,
+  th {
+    page-break-inside: avoid;
+  }
+
+  /* Show link hrefs alongside the visible text — print readers
+     can't click links, so the target URL is the only signal. */
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #555555;
+  }
+  a[href^="#"]::after,
+  a[href^="javascript:"]::after {
+    content: "";
   }
 }
