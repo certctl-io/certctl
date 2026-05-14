@@ -172,11 +172,18 @@ func (d *FileDriver) Load(ctx context.Context, path string) (Signer, error) {
 		return nil, fmt.Errorf("signer.FileDriver.Load: %w", err)
 	}
 	// CWE-22 path-traversal defense — reject paths that escape SafeRoot
-	// (when set) OR contain literal ".." segments. The validator is in
-	// the same function as the os.ReadFile sink so CodeQL recognizes
-	// the sanitizer in-scope.
+	// (when set) OR contain literal ".." segments. validateSafePath
+	// does the structured rejection; the inline assertion below
+	// re-applies the canonical filepath.Rel + ".." rejection AT THE
+	// SINK so CodeQL's go/path-injection data-flow analyzer sees the
+	// sanitizer in-function (it doesn't reliably trace through
+	// function-call boundaries — Phase 6 commit 586308e shipped only
+	// validateSafePath and CodeQL alert #29 stayed open). Hotfix #13.
 	safePath, err := d.validateSafePath(path)
 	if err != nil {
+		return nil, fmt.Errorf("signer.FileDriver.Load: %w", err)
+	}
+	if err := assertCleanAbsPath(safePath, d.SafeRoot); err != nil {
 		return nil, fmt.Errorf("signer.FileDriver.Load: %w", err)
 	}
 
@@ -229,11 +236,18 @@ func (d *FileDriver) Generate(ctx context.Context, alg Algorithm) (Signer, strin
 	}
 
 	// CWE-22 path-traversal defense — reject paths that escape SafeRoot
-	// (when set) OR contain literal ".." segments. The validator is in
-	// the same function as the os.WriteFile sink below so CodeQL
-	// recognizes the sanitizer in-scope.
+	// (when set) OR contain literal ".." segments. validateSafePath
+	// does the structured rejection; the inline assertion below
+	// re-applies the canonical filepath.Rel + ".." rejection AT THE
+	// SINK so CodeQL's go/path-injection data-flow analyzer sees the
+	// sanitizer in-function (it doesn't reliably trace through
+	// function-call boundaries — Phase 6 commit 586308e shipped only
+	// validateSafePath and CodeQL alert #29 stayed open). Hotfix #13.
 	safeOut, err := d.validateSafePath(outPath)
 	if err != nil {
+		return nil, "", fmt.Errorf("signer.FileDriver.Generate: %w", err)
+	}
+	if err := assertCleanAbsPath(safeOut, d.SafeRoot); err != nil {
 		return nil, "", fmt.Errorf("signer.FileDriver.Generate: %w", err)
 	}
 
@@ -304,6 +318,67 @@ func (d *FileDriver) Generate(ctx context.Context, alg Algorithm) (Signer, strin
 		return nil, "", fmt.Errorf("signer.FileDriver.Generate: wrap: %w", err)
 	}
 	return wrapped, safeOut, nil
+}
+
+// assertCleanAbsPath re-asserts CWE-22 path-injection invariants AT
+// THE SINK (the function that's about to call os.ReadFile /
+// os.WriteFile), not via validateSafePath in a sibling function.
+// CodeQL's go/path-injection data-flow analyzer doesn't reliably
+// trace sanitizers across function-call boundaries — it scopes its
+// recognized-sanitizer pattern matching to the same function as the
+// sink. So duplicating the check inline (filepath.Rel-style
+// containment + IsAbs + clean assertions) is the
+// belt-and-suspenders that closes alert #29.
+//
+// Invariants enforced:
+//
+//   1. path is non-empty.
+//   2. path is absolute (the validateSafePath caller resolves
+//      filepath.Abs upstream; if we get a non-absolute path here,
+//      something downstream broke the contract).
+//   3. path is filepath.Clean'd (no trailing separators, no double
+//      separators, no redundant "./").
+//   4. path's slash-normalized segments contain no literal "..".
+//   5. When safeRoot is non-empty: filepath.Rel(safeRoot, path)
+//      returns a non-"../*" result (path is at or below safeRoot in
+//      the resolved-absolute-path tree). filepath.Rel is the
+//      canonical CodeQL-recognized containment-check pattern.
+//
+// All of these are guaranteed by a successful validateSafePath
+// upstream; this function exists purely so CodeQL sees the
+// sanitizer pattern at the sink's own function-scope.
+func assertCleanAbsPath(path, safeRoot string) error {
+	if path == "" {
+		return errors.New("sink path is empty")
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("sink path %q is not absolute", path)
+	}
+	if path != filepath.Clean(path) {
+		return fmt.Errorf("sink path %q is not Clean'd", path)
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(path), "/") {
+		if seg == ".." {
+			return fmt.Errorf("sink path %q contains parent-directory segment", path)
+		}
+	}
+	if safeRoot != "" {
+		rootAbs, err := filepath.Abs(filepath.Clean(safeRoot))
+		if err != nil {
+			return fmt.Errorf("resolve SafeRoot %q: %w", safeRoot, err)
+		}
+		rel, err := filepath.Rel(rootAbs, path)
+		if err != nil {
+			return fmt.Errorf("sink path %q vs SafeRoot %q: %w", path, safeRoot, err)
+		}
+		// filepath.Rel returns ".." or "../..." when path is outside
+		// rootAbs. Reject any such result. "." or a non-dot-relative
+		// suffix is in-bounds.
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("sink path %q resolves outside SafeRoot %q", path, safeRoot)
+		}
+	}
+	return nil
 }
 
 func rsaBitsFor(a Algorithm) int {
