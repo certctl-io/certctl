@@ -41,19 +41,20 @@
 # ──────────────────────────────────────────────────────────────────────
 #
 # Current split, re-derived by the parity script's bucket-reporting
-# subcommand (post-Sprint-13.4 / 2026-05-14):
+# subcommand (post-Sprint-13.5 / 2026-05-14):
 #
-#   total entries:           51
+#   total entries:           43
 #   wire-protocol:           36
-#   rest-deferred:           15
+#   rest-deferred:           7
 #
 # Burn-down progress + remaining plan for the rest-deferred bucket:
 #
 #   Sprint 13.4 SHIPPED — 28 - 13 = 15 (auth/sessions cluster 3 ops +
 #                               auth/oidc CRUD + JWKS + test + refresh
 #                               + group-mappings cluster, 10 ops)
-#   Sprint 13.5 → 15 -  8 =  7 (auth/breakglass + auth/users +
-#                               auth/runtime-config, 8 ops)
+#   Sprint 13.5 SHIPPED — 15 -  8 =  7 (auth/breakglass admin 4 ops +
+#                               auth/users 3 ops + auth/runtime-config
+#                               1 op, 8 ops total)
 #   Sprint 13.6 →  7 -  7 =  0 (audit/export + demo-residual + 3
 #                               OIDC browser flows + auth/logout +
 #                               auth/breakglass/login, 7 ops)
@@ -210,30 +211,6 @@ documented_exceptions:
     category: rest-deferred
   - route: "POST /auth/oidc/back-channel-logout"
     why: "Bundle 2 Phase 5 RFC OIDC Back-Channel Logout 1.0 endpoint. OpenAPI rep deferred to pre-2.2.0."
-    category: rest-deferred
-  - route: "GET /api/v1/auth/breakglass/credentials"
-    why: "Bundle 2 Phase 7.5 admin break-glass list (404 when disabled; password hash never on wire)."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/breakglass/credentials"
-    why: "Bundle 2 Phase 7.5 admin break-glass set/rotate password."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock"
-    why: "Bundle 2 Phase 7.5 admin break-glass unlock after lockout."
-    category: rest-deferred
-  - route: "DELETE /api/v1/auth/breakglass/credentials/{actor_id}"
-    why: "Bundle 2 Phase 7.5 admin break-glass credential delete."
-    category: rest-deferred
-  - route: "GET /api/v1/auth/users"
-    why: "Bundle 2 audit-2026-05-10 MED-11 users page."
-    category: rest-deferred
-  - route: "DELETE /api/v1/auth/users/{id}"
-    why: "Bundle 2 audit-2026-05-10 MED-11 user deactivate."
-    category: rest-deferred
-  - route: "POST /api/v1/auth/users/{id}/reactivate"
-    why: "Bundle 2 audit-2026-05-10 MED-11 user reactivate."
-    category: rest-deferred
-  - route: "GET /api/v1/auth/runtime-config"
-    why: "Bundle 2 audit-2026-05-10 MED-12 effective auth-runtime-config (read-only)."
     category: rest-deferred
   - route: "POST /api/v1/auth/demo-residual/cleanup"
     why: "Audit 2026-05-11 A-8 demo-mode residual-grants cleanup endpoint."

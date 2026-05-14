@@ -1024,6 +1024,234 @@ paths:
         "404": { description: Mapping not found }
         "500": { description: Internal error }
 
+  # ════════════════════════════════════════════════════════════════════
+  # Phase 13 Sprint 13.5 (ARCH-H1 batch 2) — break-glass admin, users
+  # admin, runtime-config read. Authored 2026-05-14 against the
+  # internal/api/handler/auth_breakglass.go + auth_users.go handlers.
+  # Surface-invisibility: every break-glass admin endpoint returns 404
+  # when CERTCTL_BREAKGLASS_ENABLED=false; documented per-op.
+  # ════════════════════════════════════════════════════════════════════
+
+  /api/v1/auth/breakglass/credentials:
+    get:
+      tags: [Auth]
+      summary: List break-glass credentials (metadata only — never the password hash)
+      description: |
+        Permission `auth.breakglass.admin`. Audit 2026-05-10 CRIT-4
+        closure — backs the GUI Break-glass admin page. The password
+        hash is NEVER serialized to the wire; only the credential
+        metadata.
+
+        Returns 404 when `CERTCTL_BREAKGLASS_ENABLED=false` (surface-
+        invisibility: an attacker probing the admin surface gets the
+        same signal as probing the login endpoint).
+      operationId: listBreakglassCredentials
+      responses:
+        "200":
+          description: Credential list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BreakglassCredentialListResponse"
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Break-glass disabled }
+        "500": { description: Internal error }
+    post:
+      tags: [Auth]
+      summary: Set a break-glass password for an actor
+      description: |
+        Permission `auth.breakglass.admin`. Creates or rotates a
+        break-glass credential for the named `actor_id`. Password
+        strength is validated by the service (min 12 bytes, max 256
+        bytes); weak passwords return 400.
+
+        Returns 404 when `CERTCTL_BREAKGLASS_ENABLED=false`.
+      operationId: setBreakglassPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BreakglassSetPasswordRequest"
+      responses:
+        "201":
+          description: Credential created or rotated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BreakglassSetPasswordResponse"
+        "400": { description: Password fails strength requirements or invalid JSON body }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Break-glass disabled }
+        "500": { description: Internal error }
+
+  /api/v1/auth/breakglass/credentials/{actor_id}:
+    delete:
+      tags: [Auth]
+      summary: Remove a break-glass credential
+      description: |
+        Permission `auth.breakglass.admin`. Returns 404 when
+        `CERTCTL_BREAKGLASS_ENABLED=false` OR when the credential
+        doesn't exist.
+      operationId: removeBreakglassCredential
+      parameters:
+        - in: path
+          name: actor_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Credential removed }
+        "400": { description: Missing actor_id path param }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Break-glass disabled OR credential not found }
+        "500": { description: Internal error }
+
+  /api/v1/auth/breakglass/credentials/{actor_id}/unlock:
+    post:
+      tags: [Auth]
+      summary: Clear the lockout on a break-glass credential
+      description: |
+        Permission `auth.breakglass.admin`. Resets the failure counter
+        and clears any active lockout on the named credential so the
+        actor can attempt to log in again after the configured
+        lockout window has elapsed organically OR an admin unblocks
+        them early.
+
+        Returns 404 when `CERTCTL_BREAKGLASS_ENABLED=false` OR when
+        the credential doesn't exist.
+      operationId: unlockBreakglassCredential
+      parameters:
+        - in: path
+          name: actor_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Lockout cleared }
+        "400": { description: Missing actor_id path param }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Break-glass disabled OR credential not found }
+        "500": { description: Internal error }
+
+  /api/v1/auth/users:
+    get:
+      tags: [Auth]
+      summary: List federated users for the active tenant
+      description: |
+        Permission `auth.user.read`. Audit 2026-05-10 MED-11 +
+        2026-05-11 A-2 — backs the admin GUI Users page. Pagination is
+        not server-side; the repository's `ListAll` returns every row
+        and the handler filters client-side. Optional
+        `oidc_provider_id` query parameter scopes the list to users
+        federated from one provider.
+      operationId: listAuthUsers
+      parameters:
+        - in: query
+          name: oidc_provider_id
+          required: false
+          schema: { type: string }
+          description: When set, only return users whose `oidc_provider_id` matches exactly.
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthUser"
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal error }
+
+  /api/v1/auth/users/{id}:
+    delete:
+      tags: [Auth]
+      summary: Deactivate a user (sets deactivated_at + cascade-revokes active sessions)
+      description: |
+        Permission `auth.user.deactivate`. Audit 2026-05-11 A-2 — the
+        handler rejects self-deactivation with 409 to prevent the
+        "admin deactivates self, can't reactivate themselves" foot-gun
+        (break-glass remains the recovery path).
+      operationId: deactivateAuthUser
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: User deactivated + active sessions revoked }
+        "400": { description: Missing user id }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: User not found }
+        "409": { description: Refused — caller is deactivating their own account (use break-glass recovery or have another admin act) }
+        "500": { description: Internal error }
+
+  /api/v1/auth/users/{id}/reactivate:
+    post:
+      tags: [Auth]
+      summary: Reactivate a previously-deactivated user
+      description: |
+        Permission `auth.user.deactivate` (same gate as the inverse
+        op — reactivation is not a separate privilege). Idempotent:
+        reactivating an already-active user is a no-op (204).
+      operationId: reactivateAuthUser
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: User reactivated (or was already active — idempotent) }
+        "400": { description: Missing user id }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: User not found }
+        "500": { description: Internal error }
+
+  /api/v1/auth/runtime-config:
+    get:
+      tags: [Auth]
+      summary: Read the deployed auth-related runtime configuration
+      description: |
+        Permission `auth.role.assign` (admin-class — gated tighter
+        than `auth.user.read` so non-admins can't enumerate the
+        deployment's auth knobs). Audit 2026-05-10 MED-12 — backs the
+        GUI AuthSettings page so operators can verify the deployed
+        configuration matches their intent from the browser without
+        SSH access to the host.
+
+        Read-only — no mutation surface. Config changes require a
+        restart + env-var edit by design.
+      operationId: getAuthRuntimeConfig
+      responses:
+        "200":
+          description: Flat-map view of the relevant CERTCTL_* env vars
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runtime_config]
+                properties:
+                  runtime_config:
+                    type: object
+                    additionalProperties: { type: string }
+                    description: |
+                      Map of CERTCTL_* env var name → resolved value.
+                      The exact key set depends on the deployment's
+                      configured auth surface (OIDC, break-glass, etc.).
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "500": { description: Internal error }
+
   /api/v1/version:
     get:
       tags: [Health]
@@ -7061,3 +7289,125 @@ components:
           type: string
         role_id:
           type: string
+
+    # ════════════════════════════════════════════════════════════════════
+    # Phase 13 Sprint 13.5 (ARCH-H1 batch 2) schemas. Field-by-field
+    # mirror of the projection types in
+    # internal/api/handler/auth_breakglass.go + auth_users.go.
+    # ════════════════════════════════════════════════════════════════════
+
+    BreakglassCredentialResponse:
+      type: object
+      description: |
+        Mirrors internal/api/handler/auth_breakglass.go::
+        breakglassCredentialResponse. Password hash is NEVER serialized
+        to the wire — only metadata.
+      required: [actor_id, created_at, last_password_change_at, failure_count]
+      properties:
+        actor_id:
+          type: string
+          description: Actor the credential belongs to.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp the credential was first set.
+        last_password_change_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp the password was most-recently rotated.
+        failure_count:
+          type: integer
+          description: Current consecutive-failure counter (Argon2id lockout state-machine input).
+        locked_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: RFC 3339 UTC timestamp past which the lockout clears organically. Omitted when no active lockout.
+        last_failure_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: RFC 3339 UTC timestamp of the most recent failed-attempt. Omitted when failure_count == 0.
+
+    BreakglassCredentialListResponse:
+      type: object
+      description: |
+        Mirrors internal/api/handler/auth_breakglass.go::
+        listBreakglassCredentialsResponse.
+      required: [credentials]
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/BreakglassCredentialResponse"
+
+    BreakglassSetPasswordRequest:
+      type: object
+      description: |
+        Mirrors internal/api/handler/auth_breakglass.go::
+        breakglassSetPasswordRequest. Password is plaintext on the wire
+        ONLY at set-time; stored at rest as an Argon2id hash with
+        per-record salt.
+      required: [actor_id, password]
+      properties:
+        actor_id:
+          type: string
+          description: Actor the password is being set for.
+        password:
+          type: string
+          format: password
+          description: New break-glass password. Validated server-side against the strength policy (min 12 bytes, max 256 bytes).
+
+    BreakglassSetPasswordResponse:
+      type: object
+      description: |
+        Mirrors the inline response body returned by
+        AuthBreakglassHandler.SetPassword: actor_id + the credential's
+        created_at timestamp (RFC 3339, UTC).
+      required: [actor_id, created_at]
+      properties:
+        actor_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp the credential row was created (or re-created on rotation).
+
+    AuthUser:
+      type: object
+      description: |
+        Mirrors internal/api/handler/auth_users.go::userResponse. Federated
+        user shape (OIDC subject + provider). `deactivated_at` is the soft-
+        delete marker; nil/absent means the user is active.
+      required: [id, tenant_id, email, display_name, oidc_subject, oidc_provider_id, last_login_at, created_at]
+      properties:
+        id:
+          type: string
+          description: User identifier (UUID-shaped).
+        tenant_id:
+          type: string
+        email:
+          type: string
+          description: Federated email claim from the IdP.
+        display_name:
+          type: string
+          description: Federated display name (preferred_username or name claim from the IdP).
+        oidc_subject:
+          type: string
+          description: The IdP's `sub` claim for this user (stable identifier across email changes).
+        oidc_provider_id:
+          type: string
+          description: ID of the OIDC provider that minted this user record.
+        last_login_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp of the user's most-recent successful login.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC timestamp the user row was first created (upserted from an OIDC callback).
+        deactivated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: RFC 3339 UTC timestamp the user was deactivated. Omitted when the user is active.
