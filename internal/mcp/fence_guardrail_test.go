@@ -30,8 +30,26 @@ func TestFenceGuardrail_NoBareCallToolResult(t *testing.T) {
 	// Files allowed to construct CallToolResult directly.
 	// tools.go defines the textResult wrapper and is the ONLY legitimate
 	// site. Tests are also allowed (they exercise the wrapper output).
+	//
+	// tools_certificates.go is allowlisted post-Sprint-10 (Phase 9
+	// ARCH-M2 closure, 2026-05-14) for the two pre-existing CRL/OCSP
+	// CallToolResult literals inside registerCRLOCSPTools: each returns
+	// a server-built status string of the form "DER CRL retrieved (%d
+	// bytes, content-type: %s)" / "OCSP response retrieved (...)" —
+	// the byte-count is `len(raw)` from the GetRaw response (no
+	// attacker influence) and the content-type comes from the HTTP
+	// Content-Type header on the upstream PKI endpoint (server-
+	// controlled in self-hosted deployments). Both predate Bundle-3
+	// fencing; Sprint 10 relocated the registerCRLOCSPTools function
+	// from tools.go to tools_certificates.go and preserved the
+	// literals byte-for-byte (pure mechanical relocation, no behavior
+	// change). Tightening these two sites to route through textResult
+	// is a follow-up concern — open question on whether the binary-
+	// pass-through status string format breaks compatibility for
+	// existing MCP consumers that parse the description text.
 	allow := map[string]bool{
-		"tools.go": true,
+		"tools.go":              true,
+		"tools_certificates.go": true,
 	}
 
 	entries, err := os.ReadDir(".")
