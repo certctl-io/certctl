@@ -52,24 +52,11 @@ import (
 
 func main() {
 	// Phase 4 DEPL-M1 closure (2026-05-14): --migrate-only flag for
-	// the Helm pre-install/pre-upgrade hook (see
-	// deploy/helm/certctl/templates/migration-job.yaml). When set, the
-	// server loads config, opens the DB pool, runs migrations + seed,
-	// and exits — no HTTP listener, no scheduler, no signing work.
-	// Same migration code path as boot-time RunMigrations; only the
-	// surrounding lifecycle differs.
-	//
-	// Hand-parsed (instead of pulling in flag.Parse) because the rest
-	// of the server's config surface is env-var driven via
-	// config.Load(); adding a flag.Parse() with global state risks
-	// conflicting with other binaries that import cmd/server later.
-	migrateOnly := false
-	for _, arg := range os.Args[1:] {
-		if arg == "--migrate-only" {
-			migrateOnly = true
-			break
-		}
-	}
+	// the Helm pre-install/pre-upgrade hook. Phase 9 Sprint 8b
+	// (2026-05-14) extracted the flag-parse + the migration-execution
+	// block to cmd/server/migrations.go; see that file's doc-comment
+	// for the full Phase 4 lifecycle rationale.
+	migrateOnly := parseMigrateOnlyFlag()
 
 	// Load configuration
 	cfg, err := config.Load()
@@ -175,87 +162,14 @@ func main() {
 	defer db.Close()
 	logger.Info("connected to database")
 
-	// Phase 4 DEPL-M1 closure (2026-05-14): migration-via-hook posture.
-	//
-	// Three lifecycles to support:
-	//   (a) Compose / VM / bare-metal: server runs migrations at boot.
-	//       Default behavior — preserved unchanged.
-	//   (b) Helm with pre-install/pre-upgrade hook: the migration Job
-	//       runs `certctl-server --migrate-only`, does its work, and
-	//       exits. The server Deployment's pods then start with
-	//       CERTCTL_MIGRATIONS_VIA_HOOK=true set; they see the env
-	//       var and skip their boot-time RunMigrations call so the
-	//       Job's work isn't duplicated.
-	//   (c) Bare `certctl-server --migrate-only` invocation (e.g.
-	//       operator running a one-shot migration from the CLI):
-	//       runs migrations + seed and exits cleanly. No HTTP
-	//       listener, no scheduler, no signing work.
-	//
-	// migrateOnly captures case (c); CERTCTL_MIGRATIONS_VIA_HOOK
-	// captures case (b). Both paths converge on the same RunMigrations
-	// + RunSeed code below.
-	migrationsViaHook := strings.EqualFold(os.Getenv("CERTCTL_MIGRATIONS_VIA_HOOK"), "true")
-
-	if migrateOnly || !migrationsViaHook {
-		logger.Info("running migrations", "path", cfg.Database.MigrationsPath)
-		if err := postgres.RunMigrations(db, cfg.Database.MigrationsPath); err != nil {
-			logger.Error("failed to run migrations", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("migrations completed")
-	} else {
-		logger.Info("skipping migrations at boot (CERTCTL_MIGRATIONS_VIA_HOOK=true — Helm pre-install/pre-upgrade hook owns this work)")
-	}
-
-	// Apply baseline seed data.
-	//
-	// U-3 (P1, cat-u-seed_initdb_schema_drift): pre-U-3 seed.sql was mounted
-	// into postgres `/docker-entrypoint-initdb.d/` alongside a hand-curated
-	// subset of migrations. Adding a migration that introduced a new column
-	// referenced by seed.sql (cat-o-retry_interval_unit_mismatch /
-	// policy_rules.severity / etc.) without also updating the compose volume
-	// mounts caused initdb to crash on first up. Post-U-3 the compose stack
-	// drops all initdb mounts; postgres comes up with empty schema, the
-	// server runs RunMigrations above, then this RunSeed call lands the
-	// baseline data — all from a single source of truth (this binary).
-	// See internal/repository/postgres/db.go::RunSeed for the contract.
-	//
-	// Phase 4 DEPL-M1: same migration-via-hook gating as RunMigrations.
-	// When the hook owns migrations it also owns the seed pass.
-	if migrateOnly || !migrationsViaHook {
-		logger.Info("applying baseline seed", "path", cfg.Database.MigrationsPath)
-		if err := postgres.RunSeed(db, cfg.Database.MigrationsPath); err != nil {
-			logger.Error("failed to apply seed data", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("seed completed")
-	} else {
-		logger.Info("skipping baseline seed at boot (CERTCTL_MIGRATIONS_VIA_HOOK=true — hook applies seed alongside migrations)")
-	}
-
-	// Phase 4 DEPL-M1: --migrate-only early-exit. Migrations + seed are
-	// done; the operator only asked for the migration pass. Skip the
-	// HTTP listener, scheduler, signing setup, banner, etc. Exit 0
-	// cleanly so Kubernetes Job lifecycle reports success.
-	if migrateOnly {
-		logger.Info("--migrate-only: migrations + seed complete; exiting without starting server lifecycle")
-		os.Exit(0)
-	}
-
-	// Apply demo overlay seed when CERTCTL_DEMO_SEED=true. Pre-U-3 the demo
-	// overlay (deploy/docker-compose.demo.yml) mounted seed_demo.sql into
-	// postgres `/docker-entrypoint-initdb.d/`; that broke once U-3 dropped
-	// the initdb migration mounts (the demo seed references tables that
-	// wouldn't exist at initdb time). The runtime path here is the
-	// post-U-3 replacement. Default-off so a vanilla deploy never lands
-	// fake-history rows. See postgres.RunDemoSeed for the contract.
-	if cfg.Database.DemoSeed {
-		logger.Info("applying demo seed (CERTCTL_DEMO_SEED=true)", "path", cfg.Database.MigrationsPath)
-		if err := postgres.RunDemoSeed(db, cfg.Database.MigrationsPath); err != nil {
-			logger.Error("failed to apply demo seed data", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("demo seed completed")
+	// Phase 4 DEPL-M1 + Phase 9 Sprint 8b — the migration-via-hook
+	// posture (Compose / Helm-with-hook / bare --migrate-only) lives
+	// in runBootMigrations (cmd/server/migrations.go). Returns true
+	// when --migrate-only was set so we can return from main()
+	// cleanly (deferred db.Close runs vs the pre-Sprint-8b os.Exit(0)
+	// which skipped defers — see migrations.go for the rationale).
+	if exitAfterMigrations := runBootMigrations(cfg, db, logger, migrateOnly); exitAfterMigrations {
+		return
 	}
 
 	// Initialize repositories with real PostgreSQL connection
