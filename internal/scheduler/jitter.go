@@ -8,28 +8,26 @@ import (
 	"time"
 )
 
-// Phase 6 SCALE-M5 closure (2026-05-14): bounded-jitter wrapper
-// around time.Timer to spread scheduler-loop tick co-fires.
+// JitteredTicker is a bounded-jitter wrapper around time.Timer that
+// fires on C once per interval ± jitterPct, with the jitter drawn
+// fresh on every tick. The base interval is the same as a bare
+// time.NewTicker; only the per-tick envelope changes. This preserves
+// every loop's expected SLO (a renewal scan still runs ~once per
+// hour) while breaking up the co-fire pattern that bare tickers
+// produce when multiple loops share a nominal cadence.
 //
-// Pre-Phase-6 the 15 scheduler loops in scheduler.go each used a
-// bare time.NewTicker(interval). When multiple loops share a
-// nominal cadence (e.g. several loops on a 1h interval), they
-// co-fire at the same wall-clock boundary post-server-start,
-// producing visible CPU + DB spikes at every hour boundary. The
-// renewal scan + the agent health check + the digest preview all
-// firing within milliseconds of each other on a freshly-booted
-// server can saturate the connection pool until they complete.
+// Stop must be called by the caller (typically via defer) to release
+// the goroutine. After Stop, the C channel is closed.
 //
-// JitteredTicker replaces the bare time.NewTicker with a goroutine
-// that fires C once per interval ± jitterPct, drawn fresh on every
-// tick. The base interval is the same as before; only the per-tick
-// envelope changes. This preserves every loop's expected SLO (a
-// renewal scan still runs ~once per hour) while breaking up the
-// co-fire pattern.
-//
-// JitteredTicker.Stop() must be called by the caller (typically via
-// defer) to release the goroutine. After Stop, the C channel is
-// closed.
+// Phase 6 SCALE-M5 (2026-05-14) introduced this wrapper. Pre-Phase-6
+// the 15 scheduler loops in scheduler.go each used a bare
+// time.NewTicker(interval); when multiple loops shared a nominal
+// cadence (e.g. several loops on a 1h interval), they co-fired at
+// the same wall-clock boundary post-server-start, producing visible
+// CPU + DB spikes at every hour boundary. The renewal scan + the
+// agent health check + the digest preview all firing within
+// milliseconds of each other on a freshly-booted server could
+// saturate the connection pool until they completed.
 type JitteredTicker struct {
 	// C is the channel a tick fires on. Read this in the loop's
 	// select{} the same way you'd read time.Ticker.C.
