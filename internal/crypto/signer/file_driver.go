@@ -332,17 +332,17 @@ func (d *FileDriver) Generate(ctx context.Context, alg Algorithm) (Signer, strin
 //
 // Invariants enforced:
 //
-//   1. path is non-empty.
-//   2. path is absolute (the validateSafePath caller resolves
-//      filepath.Abs upstream; if we get a non-absolute path here,
-//      something downstream broke the contract).
-//   3. path is filepath.Clean'd (no trailing separators, no double
-//      separators, no redundant "./").
-//   4. path's slash-normalized segments contain no literal "..".
-//   5. When safeRoot is non-empty: filepath.Rel(safeRoot, path)
-//      returns a non-"../*" result (path is at or below safeRoot in
-//      the resolved-absolute-path tree). filepath.Rel is the
-//      canonical CodeQL-recognized containment-check pattern.
+//  1. path is non-empty.
+//  2. path is absolute (the validateSafePath caller resolves
+//     filepath.Abs upstream; if we get a non-absolute path here,
+//     something downstream broke the contract).
+//  3. path is filepath.Clean'd (no trailing separators, no double
+//     separators, no redundant "./").
+//  4. path's slash-normalized segments contain no literal "..".
+//  5. When safeRoot is non-empty: filepath.Rel(safeRoot, path)
+//     returns a non-"../*" result (path is at or below safeRoot in
+//     the resolved-absolute-path tree). filepath.Rel is the
+//     canonical CodeQL-recognized containment-check pattern.
 //
 // All of these are guaranteed by a successful validateSafePath
 // upstream; this function exists purely so CodeQL sees the
