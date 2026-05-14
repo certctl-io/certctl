@@ -11,81 +11,117 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useTrackedMutation } from '../../hooks/useTrackedMutation';
 import {
   getIssuers, getAgents, getProfiles, getOwners, getTeams, getRenewalPolicies,
   createCertificate, triggerRenewal, createTeam, createOwner,
 } from '../../api/client';
+import FormField from '../../components/FormField';
+import ModalDialog from '../../components/ModalDialog';
+import { teamSchema, type TeamFormValues } from './team.schema';
 import { WizardFooter } from './StepShell';
 
 // Inline CreateTeamModal — mirrors TeamsPage.tsx CreateTeamModal pattern.
 // Used inside CertificateStep so users can create a team without leaving the wizard.
+// Phase 5 closure (FE-M1 + UX-H4): converted from 3 useState + manual
+// onChange handlers to react-hook-form + zodResolver + FormField. The
+// FormField primitive auto-pairs <label htmlFor> with <input id> via
+// useId(), so the WCAG 1.3.1 binding contract holds by construction.
+// Zod schema lives in team.schema.ts so it can be reused if another
+// page needs the same create-team contract.
 function CreateTeamModalInline({ isOpen, onClose, onCreated }: {
   isOpen: boolean;
   onClose: () => void;
   onCreated: (teamId: string) => void;
 }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [error, setError] = useState('');
+  const [serverError, setServerError] = useState('');
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<TeamFormValues>({
+    resolver: zodResolver(teamSchema),
+    // Validate on submit (which fires when the form-bound footer button
+    // dispatches "submit") rather than gating the button on `isValid`.
+    // RHF's isValid doesn't reliably flip synchronously after a single
+    // fireEvent.change in jsdom — submit-time validation via the Zod
+    // resolver gives the same UX (errors land under the field) without
+    // the timing footgun.
+    mode: 'onSubmit',
+    defaultValues: { name: '', description: '' },
+  });
 
   const mutation = useTrackedMutation({
-    mutationFn: () => createTeam({ name: name.trim(), description: description.trim() }),
+    mutationFn: (values: TeamFormValues) =>
+      createTeam({ name: values.name, description: values.description }),
     invalidates: [['teams']],
     onSuccess: (team) => {
-      setName('');
-      setDescription('');
-      setError('');
+      reset();
+      setServerError('');
       onCreated(team.id);
       onClose();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => setServerError(err.message),
   });
 
-  if (!isOpen) return null;
+  const onSubmit = (values: TeamFormValues) => {
+    setServerError('');
+    mutation.mutate(values);
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-ink mb-4">Create Team</h2>
-        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>}
-        <form onSubmit={(e) => { e.preventDefault(); if (!name.trim()) return; mutation.mutate(); }} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-ink mb-2">
-              Name <span className="text-red-600">*</span>
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Platform Engineering"
-              autoFocus
-              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-ink mb-2">
-              Description <span className="text-xs text-ink-muted font-normal">(optional)</span>
-            </label>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
-            />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button
-              type="submit"
-              disabled={mutation.isPending || !name.trim()}
-              className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {mutation.isPending ? 'Creating...' : 'Create Team'}
-            </button>
-            <button type="button" onClick={onClose} className="flex-1 btn btn-ghost">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <ModalDialog
+      open={isOpen}
+      title="Create Team"
+      onClose={isSubmitting ? () => {} : () => { reset(); setServerError(''); onClose(); }}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={() => { reset(); setServerError(''); onClose(); }}
+            disabled={isSubmitting}
+            className="flex-1 btn btn-ghost"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="create-team-form"
+            disabled={isSubmitting}
+            className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? 'Creating...' : 'Create Team'}
+          </button>
+        </>
+      }
+    >
+      {serverError && (
+        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          {serverError}
+        </div>
+      )}
+      <form id="create-team-form" onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+        <FormField label="Name" required error={errors.name?.message}>
+          <input
+            type="text"
+            placeholder="Platform Engineering"
+            autoFocus
+            className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
+            {...register('name')}
+          />
+        </FormField>
+        <FormField label="Description" description="Optional — what does this team own?">
+          <textarea
+            rows={3}
+            className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
+            {...register('description')}
+          />
+        </FormField>
+      </form>
+    </ModalDialog>
   );
 }
 

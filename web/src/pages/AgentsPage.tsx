@@ -9,6 +9,7 @@ import {
   BlockedByDependenciesError,
 } from '../api/client';
 import PageHeader from '../components/PageHeader';
+import ModalDialog from '../components/ModalDialog';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import StatusBadge from '../components/StatusBadge';
@@ -309,129 +310,133 @@ function RetireModal({
 }) {
   if (mode.kind === 'closed') return null;
 
+  // Phase 5 closure (FE-H3): swapped inline `<div role="dialog">` markup
+  // for ModalDialog (Headless UI). Each of the 3 modes (confirm / blocked /
+  // error) renders inside the same dialog shell, so focus trap + ESC + click-
+  // outside come for free. Title + footer change per mode; body is the
+  // mode-specific content.
+  const title =
+    mode.kind === 'confirm' ? 'Retire agent' :
+    mode.kind === 'blocked' ? 'Cannot retire — active dependencies' :
+    /* error */ 'Retire failed';
+
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
-      onClick={onClose}
+    <ModalDialog
+      open={true}
+      title={title}
+      onClose={pending ? () => {} : onClose}
+      maxWidth="lg"
+      footer={
+        mode.kind === 'confirm' ? (
+          <>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-ink-muted hover:text-ink"
+              disabled={pending}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onSoftRetire}
+              disabled={pending}
+              className="px-4 py-2 text-sm font-medium text-white bg-danger rounded hover:bg-danger/90 disabled:opacity-50"
+            >
+              {pending ? 'Retiring…' : 'Retire'}
+            </button>
+          </>
+        ) : mode.kind === 'blocked' ? (
+          <>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-ink-muted hover:text-ink"
+              disabled={pending}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onForceRetire}
+              // Backend enforces reason on force; keep the GUI in lockstep
+              // rather than letting a 400 bounce back.
+              disabled={pending || !mode.reason.trim()}
+              className="px-4 py-2 text-sm font-medium text-white bg-danger rounded hover:bg-danger/90 disabled:opacity-50"
+            >
+              {pending ? 'Force-retiring…' : 'Force retire'}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-ink-muted hover:text-ink"
+          >
+            Close
+          </button>
+        )
+      }
     >
-      <div
-        className="w-full max-w-lg rounded-lg bg-surface p-6 shadow-lg border border-border"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {mode.kind === 'confirm' && (
-          <>
-            <h2 className="text-lg font-semibold text-ink">Retire agent</h2>
-            <p className="mt-2 text-sm text-ink-muted">
-              <span className="font-mono">{mode.agent.name}</span> ({mode.agent.id}) will be
-              soft-retired. The agent will stop receiving heartbeats and be removed from active
-              listings. This is reversible only by direct database intervention.
-            </p>
-            <label className="mt-4 block text-xs font-medium text-ink-muted">
-              Reason (optional)
-              <input
-                type="text"
-                value={mode.reason}
-                onChange={(e) => onReasonChange(e.target.value)}
-                placeholder="e.g. decommissioning rack 7"
-                className="mt-1 w-full rounded border border-border bg-surface-alt px-2 py-1 text-sm"
-              />
-            </label>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm text-ink-muted hover:text-ink"
-                disabled={pending}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={onSoftRetire}
-                disabled={pending}
-                className="px-4 py-2 text-sm font-medium text-white bg-danger rounded hover:bg-danger/90 disabled:opacity-50"
-              >
-                {pending ? 'Retiring…' : 'Retire'}
-              </button>
-            </div>
-          </>
-        )}
+      {mode.kind === 'confirm' && (
+        <>
+          <p className="text-sm text-ink-muted">
+            <span className="font-mono">{mode.agent.name}</span> ({mode.agent.id}) will be
+            soft-retired. The agent will stop receiving heartbeats and be removed from active
+            listings. This is reversible only by direct database intervention.
+          </p>
+          <label className="mt-4 block text-xs font-medium text-ink-muted">
+            Reason (optional)
+            <input
+              type="text"
+              value={mode.reason}
+              onChange={(e) => onReasonChange(e.target.value)}
+              placeholder="e.g. decommissioning rack 7"
+              className="mt-1 w-full rounded border border-border bg-surface-alt px-2 py-1 text-sm"
+            />
+          </label>
+        </>
+      )}
 
-        {mode.kind === 'blocked' && (
-          <>
-            <h2 className="text-lg font-semibold text-ink">Cannot retire — active dependencies</h2>
-            <p className="mt-2 text-sm text-ink-muted">
-              The agent <span className="font-mono">{mode.agent.name}</span> still has downstream
-              work tied to it. Force-retiring will cascade-retire all active targets and fail any
-              pending jobs.
-            </p>
-            <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
-              <div className="rounded border border-border bg-surface-alt p-3">
-                <dt className="text-xs text-ink-muted">Active targets</dt>
-                <dd className="mt-1 text-xl font-semibold text-ink">{mode.counts.active_targets}</dd>
-              </div>
-              <div className="rounded border border-border bg-surface-alt p-3">
-                <dt className="text-xs text-ink-muted">Active certs</dt>
-                <dd className="mt-1 text-xl font-semibold text-ink">
-                  {mode.counts.active_certificates}
-                </dd>
-              </div>
-              <div className="rounded border border-border bg-surface-alt p-3">
-                <dt className="text-xs text-ink-muted">Pending jobs</dt>
-                <dd className="mt-1 text-xl font-semibold text-ink">{mode.counts.pending_jobs}</dd>
-              </div>
-            </dl>
-            <label className="mt-4 block text-xs font-medium text-ink-muted">
-              Reason <span className="text-danger">(required for force retire)</span>
-              <input
-                type="text"
-                value={mode.reason}
-                onChange={(e) => onReasonChange(e.target.value)}
-                placeholder="e.g. rack 7 decommission, cascade retire"
-                className="mt-1 w-full rounded border border-border bg-surface-alt px-2 py-1 text-sm"
-              />
-            </label>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm text-ink-muted hover:text-ink"
-                disabled={pending}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={onForceRetire}
-                // Backend enforces reason on force; keep the GUI in lockstep
-                // rather than letting a 400 bounce back.
-                disabled={pending || !mode.reason.trim()}
-                className="px-4 py-2 text-sm font-medium text-white bg-danger rounded hover:bg-danger/90 disabled:opacity-50"
-              >
-                {pending ? 'Force-retiring…' : 'Force retire'}
-              </button>
+      {mode.kind === 'blocked' && (
+        <>
+          <p className="text-sm text-ink-muted">
+            The agent <span className="font-mono">{mode.agent.name}</span> still has downstream
+            work tied to it. Force-retiring will cascade-retire all active targets and fail any
+            pending jobs.
+          </p>
+          <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
+            <div className="rounded border border-border bg-surface-alt p-3">
+              <dt className="text-xs text-ink-muted">Active targets</dt>
+              <dd className="mt-1 text-xl font-semibold text-ink">{mode.counts.active_targets}</dd>
             </div>
-          </>
-        )}
+            <div className="rounded border border-border bg-surface-alt p-3">
+              <dt className="text-xs text-ink-muted">Active certs</dt>
+              <dd className="mt-1 text-xl font-semibold text-ink">
+                {mode.counts.active_certificates}
+              </dd>
+            </div>
+            <div className="rounded border border-border bg-surface-alt p-3">
+              <dt className="text-xs text-ink-muted">Pending jobs</dt>
+              <dd className="mt-1 text-xl font-semibold text-ink">{mode.counts.pending_jobs}</dd>
+            </div>
+          </dl>
+          <label className="mt-4 block text-xs font-medium text-ink-muted">
+            Reason <span className="text-danger">(required for force retire)</span>
+            <input
+              type="text"
+              value={mode.reason}
+              onChange={(e) => onReasonChange(e.target.value)}
+              placeholder="e.g. rack 7 decommission, cascade retire"
+              className="mt-1 w-full rounded border border-border bg-surface-alt px-2 py-1 text-sm"
+            />
+          </label>
+        </>
+      )}
 
-        {mode.kind === 'error' && (
-          <>
-            <h2 className="text-lg font-semibold text-ink">Retire failed</h2>
-            <p className="mt-2 text-sm text-danger">{mode.message}</p>
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm text-ink-muted hover:text-ink"
-              >
-                Close
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+      {mode.kind === 'error' && (
+        <p className="text-sm text-danger">{mode.message}</p>
+      )}
+    </ModalDialog>
   );
 }

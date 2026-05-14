@@ -7,6 +7,7 @@ import {
   getAuditEvents,
 } from '../api/client';
 import PageHeader from '../components/PageHeader';
+import ModalDialog from '../components/ModalDialog';
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../components/AuthProvider';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
@@ -276,30 +277,18 @@ interface ConfirmReloadModalProps {
 
 function ConfirmReloadModal({ profile, onCancel, onConfirm, pending, errorMessage }: ConfirmReloadModalProps) {
   const pathLabel = profile.path_id || '(legacy /.well-known/est root)';
+  // Phase 5 closure (FE-H3): swapped the inline-managed <div role="dialog">
+  // for ModalDialog (Headless UI) — focus trap + ESC-to-close + backdrop-
+  // click-to-close come for free. Existing test data-testids preserved
+  // verbatim so est-reload-cancel / est-reload-confirm / est-reload-error
+  // assertions keep working.
   return (
-    <div
-      role="dialog"
-      aria-labelledby="est-reload-trust-title"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-    >
-      <div className="bg-surface w-full max-w-md rounded-lg shadow-xl border border-surface-border p-6">
-        <h3 id="est-reload-trust-title" className="text-base font-semibold text-ink mb-2">
-          Reload EST mTLS trust anchor
-        </h3>
-        <p className="text-sm text-ink-muted mb-4">
-          This re-reads <code className="text-xs">{profile.trust_anchor_path}</code> from disk and atomically
-          swaps the trust pool for EST profile <strong>{pathLabel}</strong>. Equivalent to sending
-          <code className="text-xs"> SIGHUP </code> to the server. If the new file fails to parse, the
-          previous trust pool stays in place — enrollments keep working off the old trust anchor while you
-          fix the file.
-        </p>
-        {errorMessage && (
-          <div className="mb-3 rounded border border-red-300 bg-red-50 p-3 text-xs text-red-800" data-testid="est-reload-error">
-            {errorMessage}
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
+    <ModalDialog
+      open={true}
+      title="Reload EST mTLS trust anchor"
+      onClose={pending ? () => {} : onCancel}
+      footer={
+        <>
           <button
             type="button"
             onClick={onCancel}
@@ -318,9 +307,22 @@ function ConfirmReloadModal({ profile, onCancel, onConfirm, pending, errorMessag
           >
             {pending ? 'Reloading…' : 'Reload trust anchor'}
           </button>
+        </>
+      }
+    >
+      <p className="text-sm text-ink-muted mb-3">
+        This re-reads <code className="text-xs">{profile.trust_anchor_path}</code> from disk and atomically
+        swaps the trust pool for EST profile <strong>{pathLabel}</strong>. Equivalent to sending
+        <code className="text-xs"> SIGHUP </code> to the server. If the new file fails to parse, the
+        previous trust pool stays in place — enrollments keep working off the old trust anchor while you
+        fix the file.
+      </p>
+      {errorMessage && (
+        <div className="rounded border border-red-300 bg-red-50 p-3 text-xs text-red-800" data-testid="est-reload-error">
+          {errorMessage}
         </div>
-      </div>
-    </div>
+      )}
+    </ModalDialog>
   );
 }
 
