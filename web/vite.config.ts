@@ -21,6 +21,39 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // Phase 4 closure (FE-M5 + SCALE-H1): vendor manualChunks. Pre-Phase-4
+    // the single index-*.js chunk weighed ~1.07 MB raw / ~281 KB gz because
+    // every dependency landed in the same first-load file. Splitting React,
+    // React Router, TanStack Query, Recharts, and lucide-react into their
+    // own chunks lets the browser:
+    //   • Cache vendor chunks across deploys (only index-*.js rotates when
+    //     feature code changes — vendor hashes only flip when those
+    //     packages bump in package-lock.json).
+    //   • Parallelise vendor downloads on cold loads (HTTP/2 multiplex).
+    //   • Skip Recharts entirely on cold loads of non-Dashboard routes
+    //     (recharts is ~410 KB unminified, see bundlephobia.com).
+    // Combined with React.lazy() per route in main.tsx the cold-load
+    // budget for a non-Dashboard route drops to vendor.react +
+    // vendor.router + index. Dashboard pulls vendor.recharts on demand.
+    // Vite 8 uses rolldown which requires manualChunks to be a function
+    // (id) => string, not the object-shape Vite-5-era rollup accepted.
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('node_modules/react-router-dom'))   return 'vendor-router';
+          if (id.includes('node_modules/@tanstack/react-query')) return 'vendor-query';
+          if (id.includes('node_modules/recharts'))           return 'vendor-recharts';
+          if (id.includes('node_modules/lucide-react'))       return 'vendor-icons';
+          if (id.includes('node_modules/react/')
+              || id.includes('node_modules/react-dom/')
+              || id.includes('node_modules/scheduler/')) {
+            return 'vendor-react';
+          }
+          return undefined;
+        },
+      },
+    },
   },
   test: {
     globals: true,

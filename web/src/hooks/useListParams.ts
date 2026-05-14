@@ -21,7 +21,7 @@
 // JobsPage, RenewalPoliciesPage, DiscoveryPage) are deferred to a
 // follow-up bundle — tracked as new ID `M-029`.
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useTransition } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 export interface ListParams {
@@ -56,6 +56,13 @@ const DEFAULT_PAGE_SIZE = 25;
  */
 export function useListParams(defaults?: Partial<ListParams>): ListParamsControls {
   const [searchParams, setSearchParams] = useSearchParams();
+  // Phase 4 closure (PERF-M1): mark URL-resident filter / sort / page
+  // updates as a transition so React can preempt the result-table
+  // reconciliation when the operator interacts with the toolbar (e.g.
+  // rapidly toggling dropdowns while a 50-row table is still rendering
+  // the previous result). useTransition keeps the dropdown UI snappy
+  // even when the result render is expensive.
+  const [, startTransition] = useTransition();
 
   const params = useMemo<ListParams>(() => {
     const page = parsePositiveInt(searchParams.get('page'), defaults?.page ?? DEFAULT_PAGE);
@@ -88,7 +95,14 @@ export function useListParams(defaults?: Partial<ListParams>): ListParamsControl
       if (key !== 'page') {
         next.delete('page');
       }
-      setSearchParams(next, { replace: true });
+      // startTransition lets React mark the downstream table reconcile
+      // as low-priority work — urgent updates (input typing, button
+      // hover) can preempt. The URL itself still updates immediately
+      // because setSearchParams calls history.replaceState synchronously;
+      // only the React-tree reconciliation is deferred.
+      startTransition(() => {
+        setSearchParams(next, { replace: true });
+      });
     },
     [searchParams, setSearchParams],
   );

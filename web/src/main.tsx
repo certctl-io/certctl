@@ -7,7 +7,7 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
 
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -15,49 +15,81 @@ import ErrorBoundary from './components/ErrorBoundary';
 import AuthProvider from './components/AuthProvider';
 import AuthGate from './components/AuthGate';
 import Layout from './components/Layout';
+// Phase 4 closure (FE-M5 + SCALE-H1): per-route code splitting.
+// Pre-Phase-4 every page import above was eager — every page's React
+// tree + its api/client + its query-key constants + its chart panels
+// landed in the same first-load index-*.js (~1.07 MB raw / ~281 KB gz).
+//
+// Post-Phase-4 the dashboard stays eager (it's the landing route for
+// every cold load) and every other page becomes a React.lazy() boundary
+// so its chunk only ships when an operator navigates to that route.
+// Each route is wrapped in a <Suspense fallback={<Skeleton variant=
+// "page" />}> so the route transition shows a page-shaped skeleton
+// instead of a blank white frame during the chunk fetch.
+//
+// Vite's manualChunks config (see vite.config.ts) splits react /
+// react-router-dom / @tanstack/react-query / recharts / lucide-react
+// into their own vendor chunks so vendor caches survive feature
+// deploys (the index-*.js hash flips on every feature change; vendor
+// chunks only re-hash when their package versions change in
+// package-lock.json).
+//
+// Net cold-load budget post-Phase-4: vendor-react + vendor-router +
+// vendor-query + (per-route chunk) + index-*.js (now only the routing
+// + provider plumbing, not the page bodies). Dashboard adds
+// vendor-recharts on demand.
 import DashboardPage from './pages/DashboardPage';
-import CertificatesPage from './pages/CertificatesPage';
-import CertificateDetailPage from './pages/CertificateDetailPage';
-import AgentsPage from './pages/AgentsPage';
-import AgentDetailPage from './pages/AgentDetailPage';
-import JobsPage from './pages/JobsPage';
-import NotificationsPage from './pages/NotificationsPage';
-import PoliciesPage from './pages/PoliciesPage';
-import RenewalPoliciesPage from './pages/RenewalPoliciesPage';
-import IssuersPage from './pages/IssuersPage';
-import TargetsPage from './pages/TargetsPage';
-import ProfilesPage from './pages/ProfilesPage';
-import OwnersPage from './pages/OwnersPage';
-import TeamsPage from './pages/TeamsPage';
-import AgentGroupsPage from './pages/AgentGroupsPage';
-import AuditPage from './pages/AuditPage';
-import ShortLivedPage from './pages/ShortLivedPage';
-import AgentFleetPage from './pages/AgentFleetPage';
-import DiscoveryPage from './pages/DiscoveryPage';
-import NetworkScanPage from './pages/NetworkScanPage';
-import HealthMonitorPage from './pages/HealthMonitorPage';
-import DigestPage from './pages/DigestPage';
-import ObservabilityPage from './pages/ObservabilityPage';
-import JobDetailPage from './pages/JobDetailPage';
-import IssuerDetailPage from './pages/IssuerDetailPage';
-import IssuerHierarchyPage from './pages/IssuerHierarchyPage';
-import TargetDetailPage from './pages/TargetDetailPage';
-import SCEPAdminPage from './pages/SCEPAdminPage';
-import ESTAdminPage from './pages/ESTAdminPage';
-// Bundle 1 Phase 10 — RBAC management pages.
-import RolesPage from './pages/auth/RolesPage';
-import RoleDetailPage from './pages/auth/RoleDetailPage';
-import KeysPage from './pages/auth/KeysPage';
-import AuthSettingsPage from './pages/auth/AuthSettingsPage';
-import ApprovalsPage from './pages/auth/ApprovalsPage';
-// Bundle 2 Phase 8 — OIDC + session management pages.
-import OIDCProvidersPage from './pages/auth/OIDCProvidersPage';
-import OIDCProviderDetailPage from './pages/auth/OIDCProviderDetailPage';
-import GroupMappingsPage from './pages/auth/GroupMappingsPage';
-import SessionsPage from './pages/auth/SessionsPage';
-import BreakglassPage from './pages/auth/BreakglassPage';
-// Audit 2026-05-10 MED-11 closure — federated-user admin page.
-import UsersPage from './pages/auth/UsersPage';
+import Skeleton from './components/Skeleton';
+
+// Inventory.
+const CertificatesPage      = lazy(() => import('./pages/CertificatesPage'));
+const CertificateDetailPage = lazy(() => import('./pages/CertificateDetailPage'));
+const IssuersPage           = lazy(() => import('./pages/IssuersPage'));
+const IssuerDetailPage      = lazy(() => import('./pages/IssuerDetailPage'));
+const IssuerHierarchyPage   = lazy(() => import('./pages/IssuerHierarchyPage'));
+const TargetsPage           = lazy(() => import('./pages/TargetsPage'));
+const TargetDetailPage      = lazy(() => import('./pages/TargetDetailPage'));
+const ProfilesPage          = lazy(() => import('./pages/ProfilesPage'));
+// Delivery & jobs.
+const JobsPage              = lazy(() => import('./pages/JobsPage'));
+const JobDetailPage         = lazy(() => import('./pages/JobDetailPage'));
+const AgentsPage            = lazy(() => import('./pages/AgentsPage'));
+const AgentDetailPage       = lazy(() => import('./pages/AgentDetailPage'));
+const AgentFleetPage        = lazy(() => import('./pages/AgentFleetPage'));
+const AgentGroupsPage       = lazy(() => import('./pages/AgentGroupsPage'));
+// Policy & notify.
+const PoliciesPage          = lazy(() => import('./pages/PoliciesPage'));
+const RenewalPoliciesPage   = lazy(() => import('./pages/RenewalPoliciesPage'));
+const NotificationsPage     = lazy(() => import('./pages/NotificationsPage'));
+const DigestPage            = lazy(() => import('./pages/DigestPage'));
+// People.
+const OwnersPage            = lazy(() => import('./pages/OwnersPage'));
+const TeamsPage             = lazy(() => import('./pages/TeamsPage'));
+// Audit & ops.
+const AuditPage             = lazy(() => import('./pages/AuditPage'));
+const ShortLivedPage        = lazy(() => import('./pages/ShortLivedPage'));
+const DiscoveryPage         = lazy(() => import('./pages/DiscoveryPage'));
+const NetworkScanPage       = lazy(() => import('./pages/NetworkScanPage'));
+const HealthMonitorPage     = lazy(() => import('./pages/HealthMonitorPage'));
+const ObservabilityPage     = lazy(() => import('./pages/ObservabilityPage'));
+// Protocol admin.
+const SCEPAdminPage         = lazy(() => import('./pages/SCEPAdminPage'));
+const ESTAdminPage          = lazy(() => import('./pages/ESTAdminPage'));
+// Access (Bundle 1 Phase 10 — RBAC management).
+const RolesPage             = lazy(() => import('./pages/auth/RolesPage'));
+const RoleDetailPage        = lazy(() => import('./pages/auth/RoleDetailPage'));
+const KeysPage              = lazy(() => import('./pages/auth/KeysPage'));
+const AuthSettingsPage      = lazy(() => import('./pages/auth/AuthSettingsPage'));
+const ApprovalsPage         = lazy(() => import('./pages/auth/ApprovalsPage'));
+// Access (Bundle 2 Phase 8 — OIDC + session management).
+const OIDCProvidersPage     = lazy(() => import('./pages/auth/OIDCProvidersPage'));
+const OIDCProviderDetailPage = lazy(() => import('./pages/auth/OIDCProviderDetailPage'));
+const GroupMappingsPage     = lazy(() => import('./pages/auth/GroupMappingsPage'));
+const SessionsPage          = lazy(() => import('./pages/auth/SessionsPage'));
+const BreakglassPage        = lazy(() => import('./pages/auth/BreakglassPage'));
+// Audit 2026-05-10 MED-11 closure — federated-user admin.
+const UsersPage             = lazy(() => import('./pages/auth/UsersPage'));
+
 // Phase 1 closure (UX-H3): toast / snackbar system. Mounted once near
 // the root so any component can `import { toast } from "sonner"` and
 // call toast.success / toast.error without provider plumbing.
@@ -96,6 +128,14 @@ const queryClient = new QueryClient({
   },
 });
 
+// Phase 4 helper: wrap a lazy route in a page-shaped Suspense fallback.
+// The same Skeleton variant lands on every route so the transition is
+// visually consistent — operators learn "skeleton bars = chunk loading"
+// once and never see a different placeholder elsewhere.
+function lazyRoute(element: React.ReactNode) {
+  return <Suspense fallback={<Skeleton variant="page" />}>{element}</Suspense>;
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
@@ -107,37 +147,38 @@ createRoot(document.getElementById('root')!).render(
               <CommandPaletteHost />
               <Routes>
                 <Route element={<Layout />}>
+                  {/* Dashboard stays eager — landing route for every cold load. */}
                   <Route index element={<DashboardPage />} />
-                  <Route path="certificates" element={<CertificatesPage />} />
-                  <Route path="certificates/:id" element={<CertificateDetailPage />} />
-                  <Route path="agents" element={<AgentsPage />} />
-                  <Route path="agents/:id" element={<AgentDetailPage />} />
-                  <Route path="fleet" element={<AgentFleetPage />} />
-                  <Route path="jobs" element={<JobsPage />} />
-                  <Route path="jobs/:id" element={<JobDetailPage />} />
-                  <Route path="notifications" element={<NotificationsPage />} />
-                  <Route path="policies" element={<PoliciesPage />} />
-                  <Route path="renewal-policies" element={<RenewalPoliciesPage />} />
-                  <Route path="profiles" element={<ProfilesPage />} />
-                  <Route path="issuers" element={<IssuersPage />} />
-                  <Route path="issuers/:id" element={<IssuerDetailPage />} />
+                  <Route path="certificates"            element={lazyRoute(<CertificatesPage />)} />
+                  <Route path="certificates/:id"        element={lazyRoute(<CertificateDetailPage />)} />
+                  <Route path="agents"                  element={lazyRoute(<AgentsPage />)} />
+                  <Route path="agents/:id"              element={lazyRoute(<AgentDetailPage />)} />
+                  <Route path="fleet"                   element={lazyRoute(<AgentFleetPage />)} />
+                  <Route path="jobs"                    element={lazyRoute(<JobsPage />)} />
+                  <Route path="jobs/:id"                element={lazyRoute(<JobDetailPage />)} />
+                  <Route path="notifications"           element={lazyRoute(<NotificationsPage />)} />
+                  <Route path="policies"                element={lazyRoute(<PoliciesPage />)} />
+                  <Route path="renewal-policies"        element={lazyRoute(<RenewalPoliciesPage />)} />
+                  <Route path="profiles"                element={lazyRoute(<ProfilesPage />)} />
+                  <Route path="issuers"                 element={lazyRoute(<IssuersPage />)} />
+                  <Route path="issuers/:id"             element={lazyRoute(<IssuerDetailPage />)} />
                   {/* Rank 8 — operator-managed multi-level CA hierarchy.
                       Admin-gated at the API; the page renders the
                       backend's 403 as ErrorState for non-admin
                       callers. See docs/intermediate-ca-hierarchy.md. */}
-                  <Route path="issuers/:id/hierarchy" element={<IssuerHierarchyPage />} />
-                  <Route path="targets" element={<TargetsPage />} />
-                  <Route path="targets/:id" element={<TargetDetailPage />} />
-                  <Route path="owners" element={<OwnersPage />} />
-                  <Route path="teams" element={<TeamsPage />} />
-                  <Route path="agent-groups" element={<AgentGroupsPage />} />
-                  <Route path="audit" element={<AuditPage />} />
-                  <Route path="short-lived" element={<ShortLivedPage />} />
-                  <Route path="discovery" element={<DiscoveryPage />} />
-                  <Route path="network-scans" element={<NetworkScanPage />} />
-                  <Route path="health-monitor" element={<HealthMonitorPage />} />
-                  <Route path="digest" element={<DigestPage />} />
-                  <Route path="observability" element={<ObservabilityPage />} />
+                  <Route path="issuers/:id/hierarchy"   element={lazyRoute(<IssuerHierarchyPage />)} />
+                  <Route path="targets"                 element={lazyRoute(<TargetsPage />)} />
+                  <Route path="targets/:id"             element={lazyRoute(<TargetDetailPage />)} />
+                  <Route path="owners"                  element={lazyRoute(<OwnersPage />)} />
+                  <Route path="teams"                   element={lazyRoute(<TeamsPage />)} />
+                  <Route path="agent-groups"            element={lazyRoute(<AgentGroupsPage />)} />
+                  <Route path="audit"                   element={lazyRoute(<AuditPage />)} />
+                  <Route path="short-lived"             element={lazyRoute(<ShortLivedPage />)} />
+                  <Route path="discovery"               element={lazyRoute(<DiscoveryPage />)} />
+                  <Route path="network-scans"           element={lazyRoute(<NetworkScanPage />)} />
+                  <Route path="health-monitor"          element={lazyRoute(<HealthMonitorPage />)} />
+                  <Route path="digest"                  element={lazyRoute(<DigestPage />)} />
+                  <Route path="observability"           element={lazyRoute(<ObservabilityPage />)} />
                   {/* SCEP RFC 8894 + Intune master bundle Phase 9.4 (initial)
                       + Phase 9 follow-up (rebrand): per-profile SCEP
                       Administration page with Profiles / Intune Monitoring /
@@ -145,17 +186,17 @@ createRoot(document.getElementById('root')!).render(
                       itself renders an "Admin access required" banner for
                       non-admin callers and skips the underlying API calls so
                       the server never sees a 403-prone request. */}
-                  <Route path="scep" element={<SCEPAdminPage />} />
+                  <Route path="scep"                    element={lazyRoute(<SCEPAdminPage />)} />
                   {/* Backward-compat alias for external bookmarks the Phase 9
                       release advertised. Lands on the Intune Monitoring tab. */}
-                  <Route path="scep/intune" element={<SCEPAdminPage />} />
+                  <Route path="scep/intune"             element={lazyRoute(<SCEPAdminPage />)} />
                   {/* EST RFC 7030 hardening master bundle Phase 8: per-profile
                       EST Administration page with Profiles / Recent Activity /
                       Trust Bundle tabs. Same admin-gate pattern as SCEP — the
                       route is unconditional; the page renders an "Admin access
                       required" banner for non-admin callers and skips the
                       underlying API calls so the server never sees a 403. */}
-                  <Route path="est" element={<ESTAdminPage />} />
+                  <Route path="est"                     element={lazyRoute(<ESTAdminPage />)} />
                   {/* Bundle 1 Phase 10 — RBAC management surface.
                       Every page reads /api/v1/auth/me on mount via the
                       useAuthMe hook and gates affordances against the
@@ -163,19 +204,19 @@ createRoot(document.getElementById('root')!).render(
                       enforcement is the load-bearing layer; client-side
                       hide/disable is UX. */}
                   {/* Bundle 2 Phase 8 — OIDC + session management surface. */}
-                  <Route path="auth/oidc/providers" element={<OIDCProvidersPage />} />
-                  <Route path="auth/oidc/providers/:id" element={<OIDCProviderDetailPage />} />
-                  <Route path="auth/oidc/providers/:id/mappings" element={<GroupMappingsPage />} />
-                  <Route path="auth/sessions" element={<SessionsPage />} />
-                  <Route path="auth/roles" element={<RolesPage />} />
-                  <Route path="auth/roles/:id" element={<RoleDetailPage />} />
-                  <Route path="auth/keys" element={<KeysPage />} />
-                  <Route path="auth/settings" element={<AuthSettingsPage />} />
-                  <Route path="auth/approvals" element={<ApprovalsPage />} />
+                  <Route path="auth/oidc/providers"               element={lazyRoute(<OIDCProvidersPage />)} />
+                  <Route path="auth/oidc/providers/:id"           element={lazyRoute(<OIDCProviderDetailPage />)} />
+                  <Route path="auth/oidc/providers/:id/mappings"  element={lazyRoute(<GroupMappingsPage />)} />
+                  <Route path="auth/sessions"                     element={lazyRoute(<SessionsPage />)} />
+                  <Route path="auth/roles"                        element={lazyRoute(<RolesPage />)} />
+                  <Route path="auth/roles/:id"                    element={lazyRoute(<RoleDetailPage />)} />
+                  <Route path="auth/keys"                         element={lazyRoute(<KeysPage />)} />
+                  <Route path="auth/settings"                     element={lazyRoute(<AuthSettingsPage />)} />
+                  <Route path="auth/approvals"                    element={lazyRoute(<ApprovalsPage />)} />
                   {/* Audit 2026-05-10 CRIT-4 closure — break-glass admin surface. */}
-                  <Route path="auth/breakglass" element={<BreakglassPage />} />
+                  <Route path="auth/breakglass"                   element={lazyRoute(<BreakglassPage />)} />
                   {/* Audit 2026-05-10 MED-11 closure — federated-user admin. */}
-                  <Route path="auth/users" element={<UsersPage />} />
+                  <Route path="auth/users"                        element={lazyRoute(<UsersPage />)} />
                 </Route>
               </Routes>
             </BrowserRouter>

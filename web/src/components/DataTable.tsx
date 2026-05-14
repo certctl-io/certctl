@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Skeleton from './Skeleton';
 
 interface Column<T> {
   key: string;
@@ -47,16 +48,14 @@ interface DataTableProps<T> {
 }
 
 export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, emptyState, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange, pagination }: DataTableProps<T>) {
+  // Phase 4 closure (UX-M1): swap the centered spinner + "Loading..."
+  // text — which paints into a tiny vertical span and then jumps to a
+  // full-height table on resolve, the canonical CLS source — for a
+  // layout-shape-matching skeleton table sized to the actual column
+  // count. The eye reads "table loading here" and the eventual data
+  // lands in the same DOM rectangle with zero reflow.
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-16 text-ink-muted">
-        <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-        Loading...
-      </div>
-    );
+    return <Skeleton variant="table" columns={columns.length + (selectable ? 1 : 0)} />;
   }
 
   if (!data.length) {

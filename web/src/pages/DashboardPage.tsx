@@ -1,12 +1,8 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { STALE_TIME } from '../api/queryConstants';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-} from 'recharts';
 import {
   getCertificates, getJobs, getHealth,
   getDashboardSummary, getCertificatesByStatus, getExpirationTimeline,
@@ -14,8 +10,24 @@ import {
 } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
+import Skeleton from '../components/Skeleton';
 import { daysUntil, expiryColor, formatDate } from '../api/utils';
-import OnboardingWizard from './OnboardingWizard';
+// Phase 4 closure (PERF-M1 + P-H3): memo-wrapped chart panels so a query
+// refetch in one tile doesn't force every Recharts subtree to reconcile.
+// See pages/dashboard/charts.tsx for the equality model.
+import {
+  CertsByStatusPieChart,
+  ExpirationTimelineBarChart,
+  JobTrendsLineChart,
+  IssuanceRateBarChart,
+  type PieDatum,
+  type WeeklyExpirationDatum,
+} from './dashboard/charts';
+// Phase 4 closure (FE-M5): OnboardingWizard is 1043 LOC + only renders
+// on first-run dashboards (one-time dismiss persisted to localStorage).
+// Lazy-loading the wizard keeps its step-form code off the hot path for
+// every dashboard load after the operator dismisses it once.
+const OnboardingWizard = lazy(() => import('./OnboardingWizard'));
 
 // Convert PascalCase status like "RenewalInProgress" to "Renewal In Progress"
 const formatStatus = (s: string) => s.replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -54,30 +66,9 @@ function StatCard({ label, value, icon, color }: { label: string; value: string 
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-ink-muted mb-4">{title}</h3>
-      <div className="h-64">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-surface border border-surface-border rounded px-3 py-2 text-xs shadow-lg">
-      <p className="text-ink mb-1">{label}</p>
-      {payload.map((entry: any, i: number) => (
-        <p key={i} style={{ color: entry.color }}>
-          {entry.name}: {typeof entry.value === 'number' && entry.name?.includes('rate') ? `${entry.value.toFixed(1)}%` : entry.value}
-        </p>
-      ))}
-    </div>
-  );
-};
+// ChartCard + CustomTooltip + formatShortDate moved to
+// pages/dashboard/charts.tsx (Phase 4 PERF-M1 closure) where they live
+// alongside the memo-wrapped chart panels that consume them.
 
 function DigestCard() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -266,6 +257,35 @@ export default function DashboardPage() {
     refetchOnWindowFocus: true, staleTime: STALE_TIME.REAL_TIME,
   });
 
+  // Prepare pie chart data — memoized so the reference is stable across
+  // re-renders that didn't change statusCounts. Without this useMemo the
+  // chart's React.memo prop-equality check fails on every dashboard
+  // re-render (fresh array every time) and the perf win evaporates.
+  //
+  // Hooks must be called unconditionally on every render path (Rules of
+  // Hooks), so these live BEFORE the wizard early-return below — never
+  // after it.
+  const pieData = useMemo<PieDatum[]>(() => (
+    (statusCounts || []).filter(s => s.count > 0).map(s => ({
+      name: s.status,
+      value: s.count,
+      fill: STATUS_COLORS[s.status] || '#64748b',
+    }))
+  ), [statusCounts]);
+
+  // Format expiration heatmap for display — aggregate weekly for 90 days.
+  // Same useMemo reasoning as pieData above.
+  const weeklyExpiration = useMemo<WeeklyExpirationDatum[]>(() => (
+    (expirationTimeline || []).reduce<WeeklyExpirationDatum[]>((acc, bucket, i) => {
+      const weekIdx = Math.floor(i / 7);
+      if (!acc[weekIdx]) {
+        acc[weekIdx] = { week: bucket.date, count: 0 };
+      }
+      acc[weekIdx].count += bucket.count;
+      return acc;
+    }, [])
+  ), [expirationTimeline]);
+
   // Detect first-run ONCE: no user-configured issuers AND no certificates.
   // Auto-seeded env var issuers (source="env") don't count — they exist on every fresh boot.
   // Once showWizard latches true, it stays true until the user dismisses.
@@ -282,17 +302,19 @@ export default function DashboardPage() {
 
   if ((showWizard && !onboardingDismissed) || forceOnboarding) {
     return (
-      <OnboardingWizard onDismiss={() => {
-        try { localStorage.setItem('certctl:onboarding-dismissed', 'true'); } catch { /* noop */ }
-        setOnboardingDismissed(true);
-        setShowWizard(false);
-        // Strip ?onboarding=1 so page refresh doesn't relaunch the wizard
-        if (searchParams.has('onboarding')) {
-          const next = new URLSearchParams(searchParams);
-          next.delete('onboarding');
-          setSearchParams(next, { replace: true });
-        }
-      }} />
+      <Suspense fallback={<Skeleton variant="page" ariaLabel="Loading onboarding wizard" />}>
+        <OnboardingWizard onDismiss={() => {
+          try { localStorage.setItem('certctl:onboarding-dismissed', 'true'); } catch { /* noop */ }
+          setOnboardingDismissed(true);
+          setShowWizard(false);
+          // Strip ?onboarding=1 so page refresh doesn't relaunch the wizard
+          if (searchParams.has('onboarding')) {
+            const next = new URLSearchParams(searchParams);
+            next.delete('onboarding');
+            setSearchParams(next, { replace: true });
+          }
+        }} />
+      </Suspense>
     );
   }
 
@@ -301,29 +323,6 @@ export default function DashboardPage() {
   const expired = summary?.expired_certificates || 0;
   const activeAgents = summary?.active_agents || 0;
   const pendingJobs = summary?.pending_jobs || 0;
-
-  // Prepare pie chart data
-  const pieData = (statusCounts || []).filter(s => s.count > 0).map(s => ({
-    name: s.status,
-    value: s.count,
-    fill: STATUS_COLORS[s.status] || '#64748b',
-  }));
-
-  // Format expiration heatmap for display — aggregate weekly for 90 days
-  const weeklyExpiration = (expirationTimeline || []).reduce<{ week: string; count: number }[]>((acc, bucket, i) => {
-    const weekIdx = Math.floor(i / 7);
-    if (!acc[weekIdx]) {
-      acc[weekIdx] = { week: bucket.date, count: 0 };
-    }
-    acc[weekIdx].count += bucket.count;
-    return acc;
-  }, []);
-
-  // Format dates for x-axis labels
-  const formatShortDate = (dateStr: string) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-  };
 
   return (
     <>
@@ -346,96 +345,19 @@ export default function DashboardPage() {
             icon="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </div>
 
-        {/* Charts Row 1 */}
+        {/* Charts Row 1 — memo-wrapped panels from pages/dashboard/charts.tsx
+            (Phase 4 PERF-M1). Each panel re-renders only when its own data
+            ref changes, so a refetch on one tile doesn't reconcile the
+            other three Recharts subtrees. */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Certificates by Status (Pie) */}
-          <ChartCard title="Certificates by Status">
-            {pieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    dataKey="value"
-                    label={({ name, value }) => `${formatStatus(name || '')}: ${value}`}
-                    labelLine={false}
-                  >
-                    {pieData.map((entry, index) => (
-                      <Cell key={index} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend
-                    verticalAlign="bottom"
-                    height={36}
-                    formatter={(value: string) => <span className="text-xs text-ink-muted">{formatStatus(value)}</span>}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No certificate data</div>
-            )}
-          </ChartCard>
-
-          {/* Expiration Heatmap (Bar chart by week) */}
-          <ChartCard title="Expiration Timeline (Next 90 Days)">
-            {weeklyExpiration.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={weeklyExpiration}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="week" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={formatShortDate} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="count" name="Expiring certs" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No expiration data</div>
-            )}
-          </ChartCard>
+          <CertsByStatusPieChart data={pieData} />
+          <ExpirationTimelineBarChart data={weeklyExpiration} />
         </div>
 
         {/* Charts Row 2 */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Job Trends (Line chart) */}
-          <ChartCard title="Job Success/Failure Trends (30 Days)">
-            {(jobTrends || []).length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={jobTrends}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={formatShortDate} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend formatter={(value: string) => <span className="text-xs text-ink-muted">{value}</span>} />
-                  <Line type="monotone" dataKey="completed_count" name="Completed" stroke="#10b981" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="failed_count" name="Failed" stroke="#ef4444" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No job trend data</div>
-            )}
-          </ChartCard>
-
-          {/* Issuance Rate (Bar chart) */}
-          <ChartCard title="Certificate Issuance Rate (30 Days)">
-            {(issuanceRate || []).length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={issuanceRate}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={formatShortDate} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="issued_count" name="Issued" fill="#2ea88f" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No issuance data</div>
-            )}
-          </ChartCard>
+          <JobTrendsLineChart data={jobTrends || []} />
+          <IssuanceRateBarChart data={issuanceRate || []} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
