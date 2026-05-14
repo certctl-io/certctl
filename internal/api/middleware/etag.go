@@ -245,14 +245,6 @@ func (r *etagRecorder) writeHeadersToWire() {
 	r.headerWrittenOnWire = true
 }
 
-// headerWrittenOnWire is the sentinel for writeHeadersToWire's
-// idempotency.
-// (Declared on the struct via a separate field; placed here to
-// keep the struct definition compact above.)
-//
-//nolint:unused // accessed via writeHeadersToWire receiver
-func (r *etagRecorder) sentinelMarker() {}
-
 // flush emits the buffered status + body to the underlying
 // ResponseWriter. Called by the ETag middleware after the handler
 // returns AND the response is either a cache miss (no
