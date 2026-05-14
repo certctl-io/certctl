@@ -157,8 +157,18 @@ describe('Multi-page Vitest flows — Phase 8 TEST-M1', () => {
       });
 
       // 4. Detail page surfaces the same common_name the list showed.
+      // Function matcher (NOT regex) — closes CodeQL alert #36
+      // (js/regex/missing-regexp-anchor). Same case-insensitive
+      // substring semantics as the original /api\.example\.com/i but
+      // no regex for CodeQL to flag. Function form also tolerates the
+      // detail page rendering the cn inside a labelled cell ("Common
+      // name: api.example.com") where exact-match string would fail.
       await waitFor(() => {
-        expect(screen.getAllByText(/api\.example\.com/i).length).toBeGreaterThan(0);
+        expect(
+          screen.getAllByText((content) =>
+            content.toLowerCase().includes('api.example.com'),
+          ).length,
+        ).toBeGreaterThan(0);
       });
     });
 
