@@ -4,7 +4,16 @@ module.exports = {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  darkMode: 'class',
+  // Dark mode intentionally NOT wired. Phase 0 ripped out the dead
+  // class="dark" + residual dark: classes; the audit prompt for the
+  // optional Phase 7 was rejected by the operator on 2026-05-14 with
+  // the explicit posture: "no dark mode and no future dark mode
+  // wiring to maintain". Leaving `darkMode: 'class'` set would
+  // resurface as exactly the kind of half-wired hook that drove the
+  // original FE-H1 finding, so removing it locks in the decision at
+  // the config layer. If the decision ever reverses, restore this
+  // line + re-audit every primitive and page for dark: variants
+  // (NOT a piecemeal migration — see retired Phase 7 in the audit).
   theme: {
     extend: {
       colors: {
