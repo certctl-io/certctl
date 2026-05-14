@@ -86,6 +86,21 @@ export default function AuditPage() {
   if (actorFilter) params.actor = actorFilter;
   if (actionFilter) params.action = actionFilter;
   if (category) params.category = category;
+  // P-H2 closure (frontend-design-audit 2026-05-14): translate the
+  // TIME_RANGES dropdown selection into an RFC3339 `since` server
+  // param. Pre-P-H2 this filter was applied client-side AFTER fetching
+  // the entire event window, throwing 99% of rows away in JS; the
+  // server-side handler now accepts `since` (and `until`) and the
+  // audit_events table has a (event_category, timestamp DESC)
+  // composite index that makes the predicate hit an index scan.
+  //
+  // We send only `since`; the "last N units" semantic is implicit
+  // (until=now), so the operator gets a rolling window from the
+  // selected age until the moment the server reads the param.
+  if (timeRange) {
+    const hours = timeRange === '1h' ? 1 : timeRange === '24h' ? 24 : timeRange === '7d' ? 168 : 720;
+    params.since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+  }
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['audit', params],
@@ -93,14 +108,11 @@ export default function AuditPage() {
     refetchInterval: 30000,
   });
 
-  // Client-side time range filtering (server may not support time params)
-  const filtered = (data?.data || []).filter((e) => {
-    if (!timeRange) return true;
-    const ts = new Date(e.timestamp).getTime();
-    const now = Date.now();
-    const hours = timeRange === '1h' ? 1 : timeRange === '24h' ? 24 : timeRange === '7d' ? 168 : 720;
-    return now - ts < hours * 3600 * 1000;
-  });
+  // P-H2: server now applies the time-range predicate. data.data IS
+  // the filtered set; no client-side trimming needed. The pre-P-H2
+  // `filtered` block (commented out below for diff-clarity) used to
+  // walk every row and discard 99% — that's the bug P-H2 closes.
+  const filtered = data?.data || [];
 
   const columns: Column<AuditEvent>[] = [
     {

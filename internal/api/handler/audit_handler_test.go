@@ -15,13 +15,18 @@ import (
 
 // mockAuditService implements AuditService for testing.
 type mockAuditService struct {
-	listFunc      func(page, perPage int) ([]domain.AuditEvent, int64, error)
-	listByCatFunc func(category string, page, perPage int) ([]domain.AuditEvent, int64, error)
-	getFunc       func(id string) (*domain.AuditEvent, error)
+	listFunc       func(page, perPage int) ([]domain.AuditEvent, int64, error)
+	listByCatFunc  func(category string, page, perPage int) ([]domain.AuditEvent, int64, error)
+	listByFiltFunc func(since, until time.Time, category string, page, perPage int) ([]domain.AuditEvent, int64, error)
+	getFunc        func(id string) (*domain.AuditEvent, error)
 	// HIGH-11 self-audit trace — last RecordEventWithCategory call.
 	lastAuditActor    string
 	lastAuditAction   string
 	lastAuditCategory string
+	// P-H2 trace — last ListAuditEventsByFilter args.
+	lastFilterSince    time.Time
+	lastFilterUntil    time.Time
+	lastFilterCategory string
 }
 
 func (m *mockAuditService) ListAuditEvents(_ context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {
@@ -33,6 +38,27 @@ func (m *mockAuditService) ListAuditEvents(_ context.Context, page, perPage int)
 
 func (m *mockAuditService) ListAuditEventsByCategory(_ context.Context, category string, page, perPage int) ([]domain.AuditEvent, int64, error) {
 	if m.listByCatFunc != nil {
+		return m.listByCatFunc(category, page, perPage)
+	}
+	if m.listFunc != nil {
+		return m.listFunc(page, perPage)
+	}
+	return nil, 0, nil
+}
+
+// ListAuditEventsByFilter satisfies the P-H2 interface extension. The
+// test fixture remembers the (since, until, category) tuple so
+// per-subtest assertions can pin that the handler threaded the
+// query-string params through correctly. Falls back to listFunc /
+// listByCatFunc so existing tests don't need to set listByFiltFunc.
+func (m *mockAuditService) ListAuditEventsByFilter(_ context.Context, since, until time.Time, category string, page, perPage int) ([]domain.AuditEvent, int64, error) {
+	m.lastFilterSince = since
+	m.lastFilterUntil = until
+	m.lastFilterCategory = category
+	if m.listByFiltFunc != nil {
+		return m.listByFiltFunc(since, until, category, page, perPage)
+	}
+	if category != "" && m.listByCatFunc != nil {
 		return m.listByCatFunc(category, page, perPage)
 	}
 	if m.listFunc != nil {
@@ -322,6 +348,153 @@ func TestListAuditEvents_MethodNotAllowed(t *testing.T) {
 
 	if status := w.Code; status != http.StatusMethodNotAllowed {
 		t.Errorf("ListAuditEvents returned status %d, want %d", status, http.StatusMethodNotAllowed)
+	}
+}
+
+// ── P-H2 closure (since / until time-range query params) ───────────
+
+// TestListAuditEvents_WithSinceUntil pins the happy path — both bounds
+// supplied in RFC3339, mock observes them threaded into the service
+// call, response is 200.
+func TestListAuditEvents_WithSinceUntil(t *testing.T) {
+	since := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	mockSvc := &mockAuditService{
+		listByFiltFunc: func(s, u time.Time, _ string, _, _ int) ([]domain.AuditEvent, int64, error) {
+			if !s.Equal(since) {
+				t.Errorf("service since = %v, want %v", s, since)
+			}
+			if !u.Equal(until) {
+				t.Errorf("service until = %v, want %v", u, until)
+			}
+			return []domain.AuditEvent{}, 0, nil
+		},
+	}
+	handler := NewAuditHandler(mockSvc)
+
+	url := "/api/v1/audit?since=" + since.Format(time.RFC3339) + "&until=" + until.Format(time.RFC3339)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	ctx := context.WithValue(req.Context(), middleware.RequestIDKey{}, "test-req-id")
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ListAuditEvents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !mockSvc.lastFilterSince.Equal(since) {
+		t.Errorf("mock recorded since = %v, want %v", mockSvc.lastFilterSince, since)
+	}
+	if !mockSvc.lastFilterUntil.Equal(until) {
+		t.Errorf("mock recorded until = %v, want %v", mockSvc.lastFilterUntil, until)
+	}
+}
+
+// TestListAuditEvents_SinceOnly pins one-sided bound — only `since`
+// supplied, `until` stays zero. Closure of "operator filters to events
+// from the last hour" via since=<now-1h>.
+func TestListAuditEvents_SinceOnly(t *testing.T) {
+	since := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	mockSvc := &mockAuditService{}
+	handler := NewAuditHandler(mockSvc)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/audit?since="+since.Format(time.RFC3339), nil)
+	ctx := context.WithValue(req.Context(), middleware.RequestIDKey{}, "test-req-id")
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ListAuditEvents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !mockSvc.lastFilterSince.Equal(since) {
+		t.Errorf("since = %v, want %v", mockSvc.lastFilterSince, since)
+	}
+	if !mockSvc.lastFilterUntil.IsZero() {
+		t.Errorf("until = %v, want zero (open-ended)", mockSvc.lastFilterUntil)
+	}
+}
+
+// TestListAuditEvents_InvalidSince pins the parse-error 400 path.
+// Silently dropping a malformed since would return ALL rows when the
+// operator thought they were filtering — worse than rejecting.
+func TestListAuditEvents_InvalidSince(t *testing.T) {
+	mockSvc := &mockAuditService{}
+	handler := NewAuditHandler(mockSvc)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/audit?since=not-a-date", nil)
+	ctx := context.WithValue(req.Context(), middleware.RequestIDKey{}, "test-req-id")
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ListAuditEvents(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	if !mockSvc.lastFilterSince.IsZero() {
+		t.Error("service should NOT have been called on bad since")
+	}
+}
+
+// TestListAuditEvents_UntilBeforeSince pins the order assertion — a
+// reversed range surfaces 400, doesn't quietly return empty.
+func TestListAuditEvents_UntilBeforeSince(t *testing.T) {
+	since := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	mockSvc := &mockAuditService{}
+	handler := NewAuditHandler(mockSvc)
+
+	url := "/api/v1/audit?since=" + since.Format(time.RFC3339) + "&until=" + until.Format(time.RFC3339)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	ctx := context.WithValue(req.Context(), middleware.RequestIDKey{}, "test-req-id")
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ListAuditEvents(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestListAuditEvents_TimeRangePlusCategory pins that since/until
+// compose with category (the auditor-role narrow-to-auth use case
+// extended to "auth events from yesterday" without a separate
+// endpoint).
+func TestListAuditEvents_TimeRangePlusCategory(t *testing.T) {
+	since := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	mockSvc := &mockAuditService{}
+	handler := NewAuditHandler(mockSvc)
+
+	url := "/api/v1/audit?category=auth&since=" + since.Format(time.RFC3339) + "&until=" + until.Format(time.RFC3339)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	ctx := context.WithValue(req.Context(), middleware.RequestIDKey{}, "test-req-id")
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler.ListAuditEvents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if mockSvc.lastFilterCategory != "auth" {
+		t.Errorf("category = %q, want auth", mockSvc.lastFilterCategory)
+	}
+	if !mockSvc.lastFilterSince.Equal(since) {
+		t.Errorf("since = %v, want %v", mockSvc.lastFilterSince, since)
+	}
+	if !mockSvc.lastFilterUntil.Equal(until) {
+		t.Errorf("until = %v, want %v", mockSvc.lastFilterUntil, until)
 	}
 }
 

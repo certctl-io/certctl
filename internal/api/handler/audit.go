@@ -28,6 +28,18 @@ type AuditService interface {
 	// empty string returns all categories. Used by the auditor role
 	// (filtered to "auth" via /v1/audit?category=auth).
 	ListAuditEventsByCategory(ctx context.Context, eventCategory string, page, perPage int) ([]domain.AuditEvent, int64, error)
+	// ListAuditEventsByFilter (P-H2 closure, frontend-design-audit
+	// 2026-05-14) returns audit rows constrained by an optional time
+	// range AND optional category. Zero time.Time on either bound
+	// disables that bound. The repository already pushes the
+	// predicate into SQL (timestamp >=/<= since/until); this method
+	// just threads handler-parsed `since` / `until` query params
+	// through to the filter. Frontend (AuditPage) drops the pre-P-H2
+	// client-side time filter ("fetches the entire event window,
+	// throws 99% away in JS") and sends since/until directly. MCP's
+	// certctl_audit_list_with_category tool already advertised these
+	// params; this closure makes that advertised contract truthful.
+	ListAuditEventsByFilter(ctx context.Context, since, until time.Time, eventCategory string, page, perPage int) ([]domain.AuditEvent, int64, error)
 	// ExportEventsByFilter returns audit events matching a
 	// (from, to, eventCategory) filter, capped at maxRows. Audit
 	// 2026-05-10 HIGH-11 closure — backs the new
@@ -53,12 +65,29 @@ func NewAuditHandler(svc AuditService) AuditHandler {
 }
 
 // ListAuditEvents lists audit events.
-// GET /api/v1/audit?page=1&per_page=50&category=auth
+// GET /api/v1/audit?page=1&per_page=50&category=auth&since=<RFC3339>&until=<RFC3339>
 //
-// Bundle 1 Phase 8 adds the optional `category` query parameter for
+// Bundle 1 Phase 8 added the optional `category` query parameter for
 // auditor-role filtering. Allowed values: cert_lifecycle, auth, config.
 // Unknown values surface 400 so misuse is caught loud (instead of
 // silently returning all rows).
+//
+// P-H2 closure (frontend-design-audit 2026-05-14) adds the optional
+// `since` / `until` time-range query parameters. Both accept RFC3339
+// (e.g. "2026-04-01T00:00:00Z"). Either bound can be omitted to leave
+// that side open-ended. The repository already pushes the timestamp
+// predicate into the SQL query, and migration 000032's
+// (event_category, timestamp DESC) composite index makes the
+// predicate hit an index scan rather than a sequential scan.
+//
+// Note on naming: this endpoint uses `since` / `until` to match the
+// existing MCP `certctl_audit_list_with_category` tool's published
+// contract (internal/mcp/tools_audit_fix.go:174) and the audit-text
+// framing of the P-H2 finding. The sibling /api/v1/audit/export
+// endpoint uses `from` / `to` for compliance-window semantics
+// (required, ≤ 90-day range, NDJSON streaming); the two endpoints
+// share data but have different param semantics and the names were
+// chosen to reflect that.
 func (h AuditHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -93,16 +122,39 @@ func (h AuditHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var (
-		events []domain.AuditEvent
-		total  int64
-		err    error
-	)
-	if category != "" {
-		events, total, err = h.svc.ListAuditEventsByCategory(r.Context(), category, page, perPage)
-	} else {
-		events, total, err = h.svc.ListAuditEvents(r.Context(), page, perPage)
+	// P-H2: optional time-range bounds. RFC3339 parse with explicit
+	// 400 on malformed input — silently dropping a malformed `since`
+	// would be worse than rejecting it (operator gets unfiltered
+	// results when they thought they were filtering).
+	var since, until time.Time
+	if s := query.Get("since"); s != "" {
+		parsed, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest,
+				"`since` must be RFC3339 (e.g. 2026-04-01T00:00:00Z)",
+				requestID)
+			return
+		}
+		since = parsed
 	}
+	if u := query.Get("until"); u != "" {
+		parsed, err := time.Parse(time.RFC3339, u)
+		if err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest,
+				"`until` must be RFC3339 (e.g. 2026-05-01T00:00:00Z)",
+				requestID)
+			return
+		}
+		until = parsed
+	}
+	if !since.IsZero() && !until.IsZero() && !until.After(since) {
+		ErrorWithRequestID(w, http.StatusBadRequest,
+			"`until` must be after `since`",
+			requestID)
+		return
+	}
+
+	events, total, err := h.svc.ListAuditEventsByFilter(r.Context(), since, until, category, page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list audit events", requestID)
 		return

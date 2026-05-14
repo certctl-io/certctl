@@ -212,12 +212,34 @@ func (s *AuditService) ListByAction(ctx context.Context, action string, from, to
 
 // ListAuditEvents returns paginated audit events (handler interface method).
 func (s *AuditService) ListAuditEvents(ctx context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {
-	return s.ListAuditEventsByCategory(ctx, "", page, perPage)
+	return s.ListAuditEventsByFilter(ctx, time.Time{}, time.Time{}, "", page, perPage)
 }
 
 // ListAuditEventsByCategory is the Bundle 1 Phase 8 categorized variant.
-// Empty eventCategory disables the filter.
+// Empty eventCategory disables the filter. Kept as a thin wrapper around
+// ListAuditEventsByFilter so existing callers don't need to thread zero
+// time values.
 func (s *AuditService) ListAuditEventsByCategory(ctx context.Context, eventCategory string, page, perPage int) ([]domain.AuditEvent, int64, error) {
+	return s.ListAuditEventsByFilter(ctx, time.Time{}, time.Time{}, eventCategory, page, perPage)
+}
+
+// ListAuditEventsByFilter is the P-H2 closure (frontend-design-audit
+// 2026-05-14) — handler-facing list that supports server-side
+// time-range filtering on top of the existing category filter. The
+// repository (internal/repository/postgres/audit.go) has always
+// pushed `timestamp >= since` and `timestamp <= until` predicates
+// into the SQL query when AuditFilter.From / .To are set; this method
+// just threads the operator-supplied bounds from the handler into
+// the filter struct. The (event_category, timestamp DESC) composite
+// index added in migration 000032 makes the predicate push-down hit
+// an index scan rather than a sequential scan on the audit_events
+// table.
+//
+// Zero time.Time values for since OR until disable the bound (i.e.
+// "open-ended on that side"). Both zero ≡ no time filter ≡ the
+// pre-P-H2 list behavior, which is what the two delegating wrappers
+// above rely on for backward compatibility.
+func (s *AuditService) ListAuditEventsByFilter(ctx context.Context, since, until time.Time, eventCategory string, page, perPage int) ([]domain.AuditEvent, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -227,6 +249,8 @@ func (s *AuditService) ListAuditEventsByCategory(ctx context.Context, eventCateg
 
 	filter := &repository.AuditFilter{
 		EventCategory: eventCategory,
+		From:          since,
+		To:            until,
 		Page:          page,
 		PerPage:       perPage,
 	}
@@ -247,10 +271,13 @@ func (s *AuditService) ListAuditEventsByCategory(ctx context.Context, eventCateg
 	// see #audit-pagination-count — the repository currently returns
 	// the full filtered slice and we surface len(result) as total. This
 	// works for the audit page's current shape (server-side filter +
-	// client-side pagination over a bounded window) but is wrong when the
-	// frontend ports to server-side cursoring (Phase 9 P-H2). At that
-	// point the repository must add a CountAuditEvents(filter) method and
-	// this line becomes total, _ := s.repo.CountAuditEvents(ctx, filter).
+	// client-side pagination over a bounded window) but is wrong when
+	// the frontend ports to server-side cursoring. At that point the
+	// repository must add a CountAuditEvents(filter) method and this
+	// line becomes total, _ := s.repo.CountAuditEvents(ctx, filter).
+	// P-H2 (this method) didn't introduce server-side cursoring — it
+	// only added the time-range predicate — so the same limitation
+	// applies. Tracked separately.
 	total := int64(len(result))
 
 	return result, total, nil

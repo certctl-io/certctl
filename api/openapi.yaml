@@ -4110,6 +4110,21 @@ paths:
         (cert/agent/deployment events), `auth` (role/key/bootstrap
         mutations), `config` (issuer/target/settings edits). Omitting
         the parameter returns every category.
+
+        P-H2 closure (frontend-design-audit 2026-05-14) adds the
+        optional `since` / `until` time-range query parameters. Both
+        accept RFC3339 timestamps (e.g. `2026-04-01T00:00:00Z`).
+        Either bound can be omitted to leave that side open-ended.
+        Combined with `category`, they let auditor-role clients query
+        "auth events from yesterday" without a separate endpoint.
+
+        Note on naming: this endpoint uses `since` / `until` to match
+        the existing MCP `certctl_audit_list_with_category` tool's
+        published contract. The sibling `/api/v1/audit/export`
+        endpoint uses `from` / `to` for compliance-window semantics
+        (required, ≤ 90-day range, NDJSON streaming); the two
+        endpoints share data but the names reflect the different
+        param semantics.
       operationId: listAuditEvents
       parameters:
         - $ref: "#/components/parameters/page"
@@ -4120,6 +4135,23 @@ paths:
             type: string
             enum: [cert_lifecycle, auth, config]
           description: Filter to events of this event_category. (Bundle 1 Phase 8)
+        - in: query
+          name: since
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Lower bound on `timestamp` (RFC3339). Inclusive.
+            Open-ended when omitted. (P-H2 2026-05-14)
+        - in: query
+          name: until
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Upper bound on `timestamp` (RFC3339). Inclusive.
+            Open-ended when omitted. Must be after `since` if both
+            are set. (P-H2 2026-05-14)
       responses:
         "200":
           description: Paginated list of audit events
@@ -4135,7 +4167,9 @@ paths:
                         items:
                           $ref: "#/components/schemas/AuditEvent"
         "400":
-          description: Invalid `category` value
+          description: |
+            Invalid `category` value, malformed RFC3339 `since`/`until`,
+            or `until` not after `since`.
         "500":
           $ref: "#/components/responses/InternalError"
 
