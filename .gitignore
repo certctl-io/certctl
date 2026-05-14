@@ -10,6 +10,7 @@ bin/
 # Frontend
 web/node_modules/
 web/dist/
+web/.storybook-static/
 
 # Test binary, built with `go test -c`
 *.test

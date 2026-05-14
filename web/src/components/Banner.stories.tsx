@@ -16,28 +16,28 @@ type Story = StoryObj<typeof meta>;
 
 export const Error: Story = {
   args: {
-    severity: 'error',
+    type: 'error',
     children: 'Failed to issue certificate — CA rejected the CSR (RFC 5280 §4.2.1.6 SAN violation).',
   },
 };
 
 export const Warning: Story = {
   args: {
-    severity: 'warning',
+    type: 'warning',
     children: 'This issuer is in maintenance mode — new issuance requests will queue.',
   },
 };
 
 export const Success: Story = {
   args: {
-    severity: 'success',
+    type: 'success',
     children: 'Renewal complete. New certificate deployed to 3 targets.',
   },
 };
 
 export const Info: Story = {
   args: {
-    severity: 'info',
+    type: 'info',
     children: 'Approval requested. Awaiting sign-off from a different operator.',
   },
 };

@@ -20,8 +20,6 @@
   },
   "include": ["src"],
   "exclude": [
-    "src/**/*.stories.tsx",
-    "src/**/*.stories.ts",
     "src/__tests__/e2e/**/*.spec.ts"
   ]
 }

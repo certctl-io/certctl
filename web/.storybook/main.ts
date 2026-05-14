@@ -1,25 +1,28 @@
 // Copyright 2026 certctl LLC. All rights reserved.
 // SPDX-License-Identifier: BUSL-1.1
 //
-// Phase 8 TEST-H3 closure — Storybook configuration scaffold.
+// Phase 8 TEST-H3 closure — Storybook configuration. Fully wired
+// 2026-05-14 via Storybook 10.
 //
-// DEPS NOT INSTALLED IN PACKAGE.JSON. The first attempt added
-// `@storybook/react-vite ^8.6.0` + `@storybook/addon-a11y ^8.6.0`
-// + `storybook ^8.6.0` to package.json, but Storybook 8's peerDeps
-// cap Vite at v6 — the certctl project ships Vite 8 (Phase 4
-// manualChunks rewrite). CI fail confirmed the peer-conflict via
-// `npm ci`. Hotfix #9 removed the deps to unblock CI.
+// Version-selection history (recorded so the next operator who
+// upgrades Vite doesn't re-walk the same wall):
+//   • Phase 8 first attempt: Storybook 8.6 — peer-capped at Vite 6,
+//     project shipped Vite 8 (Phase 4 manualChunks rewrite). CI's
+//     `npm ci` failed ERESOLVE; Hotfix #9 removed the deps.
+//   • This file's earlier header speculated "Storybook 9 supports
+//     Vite 7+8" — that was wrong. Verified at install time
+//     2026-05-14: Storybook 9.1.20's peer range is Vite 5/6/7,
+//     ERESOLVE'd again.
+//   • Storybook 10.4.0 is the first version with explicit Vite 8
+//     in the peer range (^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0).
+//     Installed cleanly. All 8 *.stories.tsx files typecheck +
+//     `storybook build` succeeds (~3s, 17 chunks emitted).
 //
-// To install:
-//   cd web && npm install --save-dev storybook@^9.0.0 \
-//     @storybook/react-vite@^9.0.0 @storybook/addon-a11y@^9.0.0
-//   # Storybook 9 supports Vite 7+8 — verified against storybook.js.org
-//   # docs before installing.
-//
-// Once installed, this main.ts + preview.ts work as-is. The 8
-// committed *.stories.tsx files import @storybook/react types and
-// will typecheck cleanly. tsconfig.json excludes them today so
-// `npm run build` stays green in the meantime.
+// tsconfig.json no longer excludes *.stories.tsx — Storybook 10's
+// @storybook/react types are correct and the existing story files
+// validate against them. `npm run build` is unchanged (Vite still
+// only emits the production bundle; stories live in a separate
+// `npm run storybook:build` script).
 //
 // Reuses the existing Vite config from web/vite.config.ts
 // (including the Phase 4 manualChunks, the Phase 0 fontsource
