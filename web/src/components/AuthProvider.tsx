@@ -142,17 +142,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         the bypass — but the GUI still surfaces the state plainly.
       */}
       {authType === 'none' && !loading && (
+        // FE-M6 closure 2026-05-14: was a 6-prop style={...} attr;
+        // migrated to Tailwind utilities. Same visual: red banner,
+        // white text, 8px/16px padding, 13px semibold center.
         <div
           data-testid="demo-mode-banner"
           role="alert"
-          style={{
-            background: '#b91c1c',
-            color: '#fff',
-            padding: '8px 16px',
-            fontSize: 13,
-            fontWeight: 600,
-            textAlign: 'center',
-          }}
+          className="bg-red-700 text-white px-4 py-2 text-[13px] font-semibold text-center"
         >
           ⚠️ Demo mode active (CERTCTL_AUTH_TYPE=none). Every caller is anonymous admin.
           Production deployments MUST set CERTCTL_AUTH_TYPE=api-key or oidc.

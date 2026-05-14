@@ -76,8 +76,7 @@ export default function DigestPage() {
             <iframe
               srcDoc={html}
               title="Digest Preview"
-              className="w-full border-0"
-              style={{ minHeight: '600px' }}
+              className="w-full border-0 min-h-[600px]"
               sandbox="allow-same-origin"
             />
           </div>

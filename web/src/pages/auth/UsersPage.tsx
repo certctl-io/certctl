@@ -74,23 +74,29 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader title="Federated Users" subtitle="One row per (oidc_provider_id, oidc_subject) tuple." />
-      <div style={{ marginBottom: 16 }}>
-        <label style={{ marginRight: 8 }}>Filter by provider:</label>
+      {/* FE-M6 closure 2026-05-14: migrated 9 inline-style attrs in this
+          page to Tailwind utility classes. Pre-closure these were the
+          single biggest concentration of style={...} in production tsx.
+          Closes the "static styles in inline-attr position" half of
+          FE-M6; load-bearing dynamic styles (Tooltip Floating-UI, chart
+          color props, computed widths) remain inline by necessity. */}
+      <div className="mb-4">
+        <label className="mr-2">Filter by provider:</label>
         <input
           type="text"
           placeholder="op-keycloak (leave empty for all)"
           value={providerFilter}
           onChange={(e) => setProviderFilter(e.target.value)}
-          style={{ width: 280, padding: 4 }}
+          className="w-[280px] p-1"
         />
       </div>
       {err && <ErrorState message={err} />}
       {usersQuery.isLoading && <p>Loading users…</p>}
       {usersQuery.error && <ErrorState message={usersQuery.error.message} />}
       {usersQuery.data && (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table className="w-full border-collapse">
           <thead>
-            <tr style={{ borderBottom: '2px solid #ccc', textAlign: 'left' }}>
+            <tr className="border-b-2 border-gray-300 text-left">
               <th>ID</th>
               <th>Email</th>
               <th>Display Name</th>
@@ -104,7 +110,13 @@ export default function UsersPage() {
             {usersQuery.data.map((u) => {
               const deactivated = Boolean(u.deactivated_at);
               return (
-                <tr key={u.id} style={{ borderBottom: '1px solid #eee', opacity: deactivated ? 0.5 : 1 }}>
+                <tr
+                  key={u.id}
+                  className={
+                    'border-b border-gray-200 ' +
+                    (deactivated ? 'opacity-50' : 'opacity-100')
+                  }
+                >
                   <td><code>{u.id}</code></td>
                   <td>{u.email}</td>
                   <td>{u.display_name}</td>
@@ -116,7 +128,7 @@ export default function UsersPage() {
                       <button
                         onClick={() => deactivate(u)}
                         disabled={pending === u.id}
-                        style={{ padding: '4px 12px' }}
+                        className="px-3 py-1"
                       >
                         {pending === u.id ? 'Deactivating…' : 'Deactivate'}
                       </button>
@@ -125,7 +137,7 @@ export default function UsersPage() {
                       <button
                         onClick={() => reactivate(u)}
                         disabled={pending === u.id}
-                        style={{ padding: '4px 12px' }}
+                        className="px-3 py-1"
                       >
                         {pending === u.id ? 'Reactivating…' : 'Reactivate'}
                       </button>
@@ -135,7 +147,7 @@ export default function UsersPage() {
               );
             })}
             {usersQuery.data.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 12, textAlign: 'center' }}>No users matching filter.</td></tr>
+              <tr><td colSpan={7} className="p-3 text-center">No users matching filter.</td></tr>
             )}
           </tbody>
         </table>

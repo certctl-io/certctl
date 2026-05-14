@@ -32,9 +32,35 @@ type SecurityHeadersConfig struct {
 // CSP: default-src 'self' confines fetches to the same origin.
 // img-src 'self' data: allows inline base64 images (used by the
 // dashboard's certctl-logo and a few status icons).
-// style-src 'self' 'unsafe-inline' is required because Tailwind
-// (via Vite) injects per-component <style> blocks at build time;
-// without 'unsafe-inline' the dashboard would render unstyled.
+// style-src 'self' 'unsafe-inline' — the 'unsafe-inline' grant
+// is required by React's inline `style={...}` attribute model,
+// which emits HTML `style="..."` attributes that the browser
+// treats as inline styles for CSP purposes. The dashboard has 5
+// load-bearing dynamic-style sites: Tooltip's Floating-UI
+// position (left/top px values computed per-tick),
+// AgentFleetPage's dynamic color+width chart bars,
+// dashboard/charts.tsx Recharts color props, CertificatesPage's
+// progress-bar percent width, IssuerHierarchyPage's depth-based
+// marginLeft. The static-pixel uses (UsersPage filter + table UI,
+// DigestPage iframe min-height, AuthProvider demo-mode banner)
+// were migrated to Tailwind utility classes via FE-M6 closure
+// 2026-05-14.
+//
+// FE-M6 audit-framing correction: this comment USED TO say
+// "Tailwind (via Vite) injects per-component <style> blocks at
+// build time." That was factually wrong. Vite's CSS output is a
+// single .css file linked via <link rel="stylesheet"> — verified
+// against dist/index.html post-build: zero <style> tags emitted.
+// The 'unsafe-inline' grant exists for React's style-attribute
+// output path, not for Vite or Tailwind.
+//
+// Fully eliminating 'unsafe-inline' would require either banning
+// dynamic `style={...}` (rewriting the 5 load-bearing sites with
+// a CSS-in-JS library that emits hashed/nonce'd <style> blocks)
+// or adopting CSP nonces with React 18+'s style runtime. Neither
+// fits the original FE-M6 phase budget; tracked as a future
+// security-hardening item.
+//
 // 'unsafe-inline' is intentionally NOT in script-src — the
 // front-end ships as a bundled JS file, no inline scripts.
 //
