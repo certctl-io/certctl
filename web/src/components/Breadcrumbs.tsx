@@ -20,7 +20,7 @@
 // upgrading to data-router-driven crumbs is a future task once the
 // router migration ships.
 
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useInRouterContext } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 
 // pathSegmentLabels — map first-segment URL keys to human labels.
@@ -126,7 +126,19 @@ function looksLikeID(s: string): boolean {
   return s.includes('-') || /^[a-f0-9]{8,}$/i.test(s);
 }
 
+// Breadcrumbs is the public entry. Defensive against missing Router
+// context (a test that mounts a PageHeader without a <MemoryRouter>
+// wrapper used to crash here). useLocation() throws an invariant
+// error if there's no Router; gate it behind useInRouterContext()
+// + render the actual logic in a sibling so useLocation() is only
+// called when we know the context is present.
 export default function Breadcrumbs() {
+  const inRouter = useInRouterContext();
+  if (!inRouter) return null;
+  return <BreadcrumbsInner />;
+}
+
+function BreadcrumbsInner() {
   const { pathname } = useLocation();
   const crumbs = crumbsFor(pathname);
 
