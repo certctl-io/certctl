@@ -62,6 +62,11 @@ import UsersPage from './pages/auth/UsersPage';
 // the root so any component can `import { toast } from "sonner"` and
 // call toast.success / toast.error without provider plumbing.
 import Toaster from './components/Toaster';
+// Phase 3 closure (UX-H6 + FE-L4): cmd+k command palette mounted at
+// the root. The hook + listener live in CommandPaletteHost so the
+// keydown binding stays scoped to the React tree (auto-cleanup on
+// HMR + StrictMode).
+import CommandPaletteHost from './components/CommandPaletteHost';
 import { STALE_TIME, GC_TIME } from './api/queryConstants';
 import './index.css';
 
@@ -99,6 +104,7 @@ createRoot(document.getElementById('root')!).render(
         <AuthProvider>
           <AuthGate>
             <BrowserRouter>
+              <CommandPaletteHost />
               <Routes>
                 <Route element={<Layout />}>
                   <Route index element={<DashboardPage />} />

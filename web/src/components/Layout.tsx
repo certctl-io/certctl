@@ -1,62 +1,201 @@
+// Copyright 2026 certctl LLC. All rights reserved.
+// SPDX-License-Identifier: BUSL-1.1
+//
+// Phase 3 joint closure (UX-H1 + FE-H2 + FE-L4, 2026-05-14):
+//
+//   UX-H1 — sidebar regrouped from a flat 31-item list into 7 semantic
+//   groups: Inventory, Trust, Delivery, People, Notify, Access, Audit.
+//   Audit-accuracy callout: the original UX-H1 finding's wording
+//   ("/auth/* completely absent from primary nav") was factually wrong
+//   — all 8 /auth/* entries + /audit were already in the array; the
+//   issue was UNGROUPED, not absent. The correct framing is "31 flat
+//   items, no hierarchy, scroll-list to find Audit Trail."
+//
+//   FE-H2 — every nav item now carries a lucide-react icon component
+//   reference instead of a literal SVG path string. 31 path strings
+//   removed; 27 named lucide imports added.
+//
+//   FE-L4 — collapsible groups (click the group header to fold/unfold)
+//   give the keyboard-first power-user a way to compact the sidebar
+//   to just the surfaces they care about. State persists per-group in
+//   localStorage so the choice survives reloads.
+//
+// FE-M6 (CSP unsafe-inline tightening) is NOT closed here — pre-Phase-3
+// re-verification confirmed the CSP comment on style-src 'unsafe-inline'
+// cites "Tailwind (via Vite) injects per-component <style> blocks at
+// build time," not inline SVG attributes. There are also 17 production
+// tsx files with React style={...} attributes (Tooltip, AgentFleetPage,
+// UsersPage, etc.) that emit inline styles. Tightening the CSP needs
+// all those paths migrated to utility classes/CSS variables — out of
+// scope for this phase.
+
+import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import {
+  // Inventory
+  LayoutDashboard, ShieldCheck, Search, Server, Network, Radar, Timer,
+  // Trust
+  KeyRound, FileText, ScrollText, RefreshCw, Wrench,
+  // Delivery
+  Target, ListTodo, HeartPulse,
+  // People
+  User, Users, Group,
+  // Notify
+  Bell, Inbox, Activity,
+  // Access
+  Clock, UserCog, CheckCircle2, AlertTriangle, Cog,
+  // Logout + setup
+  LogOut, HelpCircle,
+  // Group header chevron
+  ChevronDown, ChevronRight,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import logo from '../assets/certctl-logo.png';
 
-const nav = [
-  { to: '/',              label: 'Dashboard',     icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4' },
-  { to: '/certificates',  label: 'Certificates',  icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
-  { to: '/agents',        label: 'Agents',        icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2' },
-  { to: '/fleet',          label: 'Fleet Overview', icon: 'M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-  { to: '/jobs',          label: 'Jobs',          icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-  { to: '/notifications', label: 'Notifications', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9' },
-  { to: '/policies',      label: 'Policies',      icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
-  { to: '/renewal-policies', label: 'Renewal Policies', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-  { to: '/profiles',      label: 'Profiles',      icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
-  { to: '/issuers',       label: 'Issuers',       icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' },
-  { to: '/targets',       label: 'Targets',       icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
-  { to: '/owners',        label: 'Owners',        icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
-  { to: '/teams',         label: 'Teams',         icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
-  { to: '/agent-groups',  label: 'Agent Groups',  icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10 M9 3v2m6-2v2' },
-  { to: '/discovery',     label: 'Discovery',       icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
-  { to: '/network-scans', label: 'Network Scans',  icon: 'M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z M9 12l2 2 4-4' },
-  { to: '/health-monitor', label: 'Health Monitor', icon: 'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z' },
-  { to: '/short-lived',   label: 'Short-Lived',    icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-  { to: '/digest',        label: 'Digest',         icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
-  { to: '/observability', label: 'Observability',  icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-  { to: '/scep',          label: 'SCEP Admin',     icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' },
-  { to: '/est',           label: 'EST Admin',      icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
-  { to: '/audit',         label: 'Audit Trail',   icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-  // Bundle 1 Phase 10 — RBAC management (Roles / Keys / Settings).
-  // Bundle 2 Phase 8 — OIDC + Sessions.
-  { to: '/auth/oidc/providers', label: 'OIDC Providers', icon: 'M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4' },
-  { to: '/auth/sessions',       label: 'Sessions',       icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-  // Audit 2026-05-11 Fix 11 — UsersPage sidebar entry (MED-11 discoverability).
-  // The MED-11 closure wired UsersPage but no nav entry; operators had to know
-  // the URL /auth/users to reach the federated-user-management surface. This
-  // entry sits adjacent to Sessions because the two share the same mental
-  // model (federated identity admin). UsersPage handles its own 403 state for
-  // callers without auth.user.read so we don't need to gate the nav entry;
-  // every other entry in this array uses the same unconditional pattern.
-  { to: '/auth/users',     label: 'Users',         icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', testID: 'nav-auth-users' },
-  { to: '/auth/roles',    label: 'Roles',         icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
-  { to: '/auth/keys',      label: 'API Keys',      icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' },
-  { to: '/auth/approvals', label: 'Approvals',     icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
-  // Audit 2026-05-10 CRIT-4 closure — break-glass admin surface.
-  { to: '/auth/breakglass', label: 'Break-glass',  icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
-  { to: '/auth/settings',  label: 'Auth Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
-];
-
-function Icon({ d }: { d: string }) {
-  return (
-    <svg className="w-[18px] h-[18px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d={d} />
-    </svg>
-  );
+// -----------------------------------------------------------------------------
+// Nav model — 7 semantic groups across 31 items.
+// -----------------------------------------------------------------------------
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  /** Optional data-testid; today only `nav-auth-users` (Audit 2026-05-11 Fix 11). */
+  testID?: string;
+}
+interface NavGroup {
+  /** localStorage key suffix for collapsed-state persistence. */
+  id: string;
+  /** Sidebar header label. */
+  label: string;
+  items: NavItem[];
 }
 
+const navGroups: NavGroup[] = [
+  {
+    id: 'inventory',
+    label: 'Inventory',
+    items: [
+      { to: '/',               label: 'Dashboard',      icon: LayoutDashboard },
+      { to: '/certificates',   label: 'Certificates',   icon: ShieldCheck },
+      { to: '/discovery',      label: 'Discovery',      icon: Search },
+      { to: '/agents',         label: 'Agents',         icon: Server },
+      { to: '/fleet',          label: 'Fleet Overview', icon: Network },
+      { to: '/network-scans',  label: 'Network Scans',  icon: Radar },
+      { to: '/short-lived',    label: 'Short-Lived',    icon: Timer },
+    ],
+  },
+  {
+    id: 'trust',
+    label: 'Trust',
+    items: [
+      { to: '/issuers',          label: 'Issuers',          icon: KeyRound },
+      { to: '/profiles',         label: 'Profiles',         icon: FileText },
+      { to: '/policies',         label: 'Policies',         icon: ScrollText },
+      { to: '/renewal-policies', label: 'Renewal Policies', icon: RefreshCw },
+      { to: '/scep',             label: 'SCEP Admin',       icon: Wrench },
+      { to: '/est',              label: 'EST Admin',        icon: Wrench },
+    ],
+  },
+  {
+    id: 'delivery',
+    label: 'Delivery',
+    items: [
+      { to: '/targets',         label: 'Targets',        icon: Target },
+      { to: '/jobs',            label: 'Jobs',           icon: ListTodo },
+      { to: '/health-monitor',  label: 'Health Monitor', icon: HeartPulse },
+    ],
+  },
+  {
+    id: 'people',
+    label: 'People',
+    items: [
+      { to: '/owners',       label: 'Owners',       icon: User },
+      { to: '/teams',        label: 'Teams',        icon: Users },
+      { to: '/agent-groups', label: 'Agent Groups', icon: Group },
+    ],
+  },
+  {
+    id: 'notify',
+    label: 'Notify',
+    items: [
+      { to: '/notifications', label: 'Notifications', icon: Bell },
+      { to: '/digest',        label: 'Digest',        icon: Inbox },
+      { to: '/observability', label: 'Observability', icon: Activity },
+    ],
+  },
+  {
+    id: 'access',
+    label: 'Access',
+    items: [
+      // Bundle 2 Phase 8 — OIDC + Sessions.
+      { to: '/auth/oidc/providers', label: 'OIDC Providers', icon: ShieldCheck },
+      { to: '/auth/sessions',       label: 'Sessions',       icon: Clock },
+      // Audit 2026-05-11 Fix 11 — `nav-auth-users` testid pins this entry's
+      // selectability; sit Users immediately after Sessions to preserve the
+      // federated-identity DOM order asserted in Layout.test.tsx.
+      { to: '/auth/users',          label: 'Users',          icon: Users,    testID: 'nav-auth-users' },
+      { to: '/auth/roles',          label: 'Roles',          icon: UserCog },
+      { to: '/auth/keys',           label: 'API Keys',       icon: KeyRound },
+      { to: '/auth/approvals',      label: 'Approvals',      icon: CheckCircle2 },
+      // Audit 2026-05-10 CRIT-4 closure — break-glass admin.
+      { to: '/auth/breakglass',     label: 'Break-glass',    icon: AlertTriangle },
+      { to: '/auth/settings',       label: 'Auth Settings',  icon: Cog },
+    ],
+  },
+  {
+    id: 'audit',
+    label: 'Audit',
+    items: [
+      { to: '/audit', label: 'Audit Trail', icon: ScrollText },
+    ],
+  },
+];
+
+// -----------------------------------------------------------------------------
+// useCollapsedGroups — persist per-group collapsed state in localStorage.
+// -----------------------------------------------------------------------------
+const STORAGE_KEY = 'certctl:nav:collapsed-groups';
+
+function useCollapsedGroups(): [Set<string>, (id: string) => void] {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsed]));
+    } catch {
+      /* noop — storage quota / privacy mode */
+    }
+  }, [collapsed]);
+
+  const toggle = (id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  return [collapsed, toggle];
+}
+
+// -----------------------------------------------------------------------------
+// Layout
+// -----------------------------------------------------------------------------
 export default function Layout() {
   const { authRequired, logout } = useAuth();
   const navigate = useNavigate();
+  const [collapsed, toggleGroup] = useCollapsedGroups();
 
   const openSetupGuide = () => {
     try { localStorage.removeItem('certctl:onboarding-dismissed'); } catch { /* noop */ }
@@ -78,25 +217,58 @@ export default function Layout() {
           </div>
         </div>
 
-        <nav className="flex-1 py-2 px-3 space-y-0.5 overflow-y-auto">
-          {nav.map(item => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              data-testid={'testID' in item ? item.testID : undefined}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 text-sm rounded transition-all duration-150 ${
-                  isActive
-                    ? 'bg-white/15 text-white font-semibold shadow-sm'
-                    : 'text-sidebar-text hover:text-white hover:bg-white/10'
-                }`
-              }
-            >
-              <Icon d={item.icon} />
-              {item.label}
-            </NavLink>
-          ))}
+        <nav className="flex-1 py-2 px-3 space-y-3 overflow-y-auto" aria-label="Primary navigation">
+          {navGroups.map((group) => {
+            const isCollapsed = collapsed.has(group.id);
+            return (
+              <div key={group.id} className="space-y-0.5">
+                {/* Group header — clickable to toggle collapse. */}
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.id)}
+                  aria-expanded={!isCollapsed}
+                  aria-controls={`nav-group-${group.id}`}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-2xs uppercase tracking-wider text-brand-300/60 hover:text-brand-300 transition-colors border-t border-white/10 pt-2 mt-1 first:border-t-0 first:pt-1 first:mt-0"
+                >
+                  <span>{group.label}</span>
+                  {isCollapsed
+                    ? <ChevronRight className="w-3 h-3 shrink-0" aria-hidden="true" />
+                    : <ChevronDown  className="w-3 h-3 shrink-0" aria-hidden="true" />}
+                </button>
+                {/* Group items — fold via inline display:none when collapsed
+                    (vs unmount) so the NavLinks retain focus state and the
+                    operator's next click doesn't re-render the entire group.
+                    aria-hidden mirrors the visual state for screen readers. */}
+                <div
+                  id={`nav-group-${group.id}`}
+                  className={`space-y-0.5 ${isCollapsed ? 'hidden' : ''}`}
+                  aria-hidden={isCollapsed}
+                >
+                  {group.items.map((item) => {
+                    const ItemIcon = item.icon;
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.to === '/'}
+                        data-testid={item.testID}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-3 py-2 text-sm rounded transition-all duration-150 ${
+                            isActive
+                              ? 'bg-white/15 text-white font-semibold shadow-sm'
+                              : 'text-sidebar-text hover:text-white hover:bg-white/10'
+                          }`
+                        }
+                      >
+                        <ItemIcon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                        {item.label}
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </nav>
 
         <div className="px-3 pb-2 pt-2 border-t border-white/10">
@@ -106,7 +278,7 @@ export default function Layout() {
             title="Reopen the onboarding wizard"
             className="w-full flex items-center gap-3 px-3 py-2 text-sm rounded text-sidebar-text hover:text-white hover:bg-white/10 transition-all duration-150"
           >
-            <Icon d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            <HelpCircle className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} aria-hidden="true" />
             Setup guide
           </button>
         </div>
@@ -118,10 +290,9 @@ export default function Layout() {
               onClick={logout}
               className="text-xs text-sidebar-text hover:text-white transition-colors"
               title="Sign out"
+              aria-label="Sign out"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-              </svg>
+              <LogOut className="w-4 h-4" strokeWidth={1.75} aria-hidden="true" />
             </button>
           )}
         </div>
