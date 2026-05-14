@@ -51,12 +51,17 @@ interface ErrorPayload {
  * Buildversion is injected by Vite at build time via define() —
  * falling back to 'dev' if missing means local dev doesn't fail to
  * compile.
+ *
+ * NOTE: the `declare const` MUST sit ABOVE its first use. JavaScript
+ * permits use-before-declare for `var` / function decls, but CodeQL's
+ * `js/use-before-declaration` rule flags it as a readability hazard
+ * (alert #37 on commit aa1c12a). We keep the symbol declared first.
  */
+declare const __APP_VERSION__: string;
+
 const BUILD_VERSION = (
   typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
 );
-
-declare const __APP_VERSION__: string;
 
 /**
  * Optional Sentry-class endpoint. When set, the boundary POSTs the
