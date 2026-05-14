@@ -64,14 +64,30 @@ var (
 
 // mcpToolFiles lists the (non-test) Go files expected to register
 // MCP tools.
+//
+// Phase 9 Sprint 10 (commit fbe053aa, 2026-05-14): tools.go was split
+// into six tool-domain sibling files in the same `mcp` package
+// (tools_certificates.go + tools_agents.go + tools_resources.go +
+// tools_jobs.go + tools_discovery.go + tools_admin.go). Original
+// tools.go now holds only the RegisterTools dispatcher + Bundle-3
+// fence wrappers + paginationQuery helper — zero mcp.AddTool calls.
+// This list is the union of pre-Sprint-10 + Sprint-10 sibling files.
 func mcpToolFiles(repo string) []string {
 	base := filepath.Join(repo, "internal", "mcp")
 	return []string{
+		// Pre-Sprint-10 catalogue.
 		filepath.Join(base, "tools.go"),
 		filepath.Join(base, "tools_audit_fix.go"),
 		filepath.Join(base, "tools_auth.go"),
 		filepath.Join(base, "tools_auth_bundle2.go"),
 		filepath.Join(base, "tools_est.go"),
+		// Phase 9 Sprint 10 sibling files.
+		filepath.Join(base, "tools_certificates.go"),
+		filepath.Join(base, "tools_agents.go"),
+		filepath.Join(base, "tools_resources.go"),
+		filepath.Join(base, "tools_jobs.go"),
+		filepath.Join(base, "tools_discovery.go"),
+		filepath.Join(base, "tools_admin.go"),
 	}
 }
 

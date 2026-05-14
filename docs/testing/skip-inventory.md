@@ -114,7 +114,7 @@ Re-run inventory with: `./scripts/skip-inventory.sh`.
 
 ### `internal/ciparity`
 
-- `internal/ciparity/surface_parity_test.go:97` — // readFileOrSkip reads a file; on ENOENT, calls t.Skipf rather than
+- `internal/ciparity/surface_parity_test.go:113` — // readFileOrSkip reads a file; on ENOENT, calls t.Skipf rather than
 
 ### `internal/connector/issuer/acme`
 

@@ -27,6 +27,7 @@ ALLOWLIST=(
     "./internal/auth/context.go"                     # const DemoAnonActorID source-of-truth (canonical)
     "./internal/auth/middleware.go"                  # NewDemoModeAuth — injects synthetic actor under Type=none
     "./internal/cli/auth_scope_down.go"              # interactive prompt filter
+    "./internal/config/auth.go"                      # Phase 9 Sprint 5 — Auth-family validate-time guard comments + AdminKey wiring narrative (relocated from config.go in commit 51f9cf13; same references, different file)
     "./internal/config/config.go"                    # validate-time guard comments + DemoModeResidualStrict env var
     "./internal/domain/audit.go"                     # audit-event documentation comment
     "./internal/domain/auth/validate.go"             # const DemoAnonActorID mirror
