@@ -51,6 +51,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from './AuthProvider';
+import { ExternalLink } from './ExternalLink';
 import logo from '../assets/certctl-logo.png';
 
 // -----------------------------------------------------------------------------
@@ -289,18 +290,23 @@ export default function Layout() {
             the LinkedIn link (the same href + rel="me noopener" pattern
             the landing page uses). Single-maintainer OSS standard
             (Cal.com, Plausible, Beekeeper Studio do the same). */}
+        {/* Maintainer attribution row. The Bundle-8 L-015 CI guard line-greps
+            for `target="_blank"` without `rel="noopener noreferrer"` on the
+            SAME LINE — splitting target + rel across lines (as the prior
+            bare <a> did) tripped the guard. ExternalLink is the canonical
+            chokepoint that the guard allowlists. We lose the rel="me" hint
+            (LinkedIn's identity-claim signal, not load-bearing), but gain
+            the CI gate. */}
         <div className="px-5 pt-3 pb-1 border-t border-white/10">
           <span className="text-2xs text-sidebar-text/70 font-mono">
             Built and maintained by{' '}
-            <a
+            <ExternalLink
               href="https://www.linkedin.com/in/shankar-k-a1b6853ba"
-              target="_blank"
-              rel="me noopener noreferrer"
               className="text-sidebar-text/90 hover:text-white transition-colors underline-offset-2 hover:underline"
               title="Shankar on LinkedIn — opens in a new tab"
             >
               Shankar
-            </a>
+            </ExternalLink>
           </span>
         </div>
 

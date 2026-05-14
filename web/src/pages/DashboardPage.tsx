@@ -29,8 +29,9 @@ import {
 // every dashboard load after the operator dismisses it once.
 const OnboardingWizard = lazy(() => import('./OnboardingWizard'));
 
-// Convert PascalCase status like "RenewalInProgress" to "Renewal In Progress"
-const formatStatus = (s: string) => s.replace(/([a-z])([A-Z])/g, '$1 $2');
+// formatStatus moved to pages/dashboard/charts.tsx in Phase 4 alongside
+// the memoized chart panels that use it; deleted from here in Hotfix #8
+// to close CodeQL js/unused-local-variable alert #35.
 
 const STATUS_COLORS: Record<string, string> = {
   Active: '#10b981',
