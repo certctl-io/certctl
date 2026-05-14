@@ -241,6 +241,27 @@ func (r *etagRecorder) writeHeadersToWire() {
 	if r.bodyTruncated && r.headerWrittenOnWire {
 		return
 	}
+	// Hotfix #12 (CodeQL alert #34 — go/reflected-xss): defense-in-
+	// depth Content-Type guard. This middleware is wired ONLY to JSON
+	// list endpoints (GET /api/v1/{certificates,agents,jobs,audit,
+	// discovered-certificates} — see internal/api/router/router.go).
+	// Every wrapped handler currently sets Content-Type:
+	// application/json via handler.JSON() before the first Write. But
+	// the recorder is a generic byte forwarder; CodeQL's data-flow
+	// query sees `r.ResponseWriter.Write(b)` at the sink and can't
+	// see that the wrapped handler set a non-HTML Content-Type — so
+	// it flags reflected-XSS even though browsers don't render
+	// application/json as HTML. The fix is to make the Content-Type
+	// guarantee explicit at the chokepoint: if the wrapped handler
+	// forgot to set Content-Type, default to application/json +
+	// charset=utf-8 here. Behavior-preserving for the 5 current
+	// handlers (they all set Content-Type) and a safe guard against
+	// a future handler bug that would otherwise let the browser
+	// content-sniff a JSON body as text/html.
+	hdr := r.ResponseWriter.Header()
+	if hdr.Get("Content-Type") == "" {
+		hdr.Set("Content-Type", "application/json; charset=utf-8")
+	}
 	r.ResponseWriter.WriteHeader(r.status)
 	r.headerWrittenOnWire = true
 }
