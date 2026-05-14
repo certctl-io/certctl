@@ -146,16 +146,32 @@ func (l *PostgresSlidingWindowLimiter) Allow(key string, now time.Time) error {
 		return fmt.Errorf("ratelimit: ensure row: %w", err)
 	}
 
-	// Step 2: lock the row + read current state.
-	var existing pq.GenericArray
-	var ts []time.Time
-	existing.A = &ts
+	// Step 2: lock the row + read current state. lib/pq cannot scan a
+	// TIMESTAMPTZ[] column back into []time.Time directly: time.Time
+	// does not implement sql.Scanner, and pq.GenericArray's per-element
+	// scan path calls Scan() (not database/sql's convertAssign), so the
+	// inner Scan fails with
+	//   "pq: scanning to time.Time is not implemented; only sql.Scanner".
+	// Workaround: ask Postgres to format each timestamp as a canonical
+	// ISO 8601 UTC string via to_char(... AT TIME ZONE 'UTC', ...), read
+	// the column as text[] via pq.StringArray (well-supported), and
+	// parse Go-side. The to_char format is fully deterministic (6-digit
+	// microseconds, "T" separator, "Z" suffix) regardless of the
+	// session's DateStyle / TimeZone settings.
+	const pgTimestampLayout = "2006-01-02T15:04:05.000000Z"
+	var tsStrings pq.StringArray
 	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(timestamps, '{}'::timestamptz[])
+		SELECT COALESCE(
+			ARRAY(
+				SELECT to_char(t AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+				FROM unnest(timestamps) AS t
+			),
+			ARRAY[]::text[]
+		)
 		FROM rate_limit_buckets
 		WHERE bucket_key = $1
 		FOR UPDATE
-	`, key).Scan(&existing); err != nil {
+	`, key).Scan(&tsStrings); err != nil {
 		// Shouldn't happen — step 1 ensured the row exists. Treat
 		// the sql.ErrNoRows path as a no-op (be conservative; never
 		// over-limit on transient DB weirdness).
@@ -163,6 +179,14 @@ func (l *PostgresSlidingWindowLimiter) Allow(key string, now time.Time) error {
 			return nil
 		}
 		return fmt.Errorf("ratelimit: select-for-update: %w", err)
+	}
+	ts := make([]time.Time, 0, len(tsStrings))
+	for _, s := range tsStrings {
+		parsed, err := time.Parse(pgTimestampLayout, s)
+		if err != nil {
+			return fmt.Errorf("ratelimit: parse stored timestamp %q: %w", s, err)
+		}
+		ts = append(ts, parsed.UTC())
 	}
 
 	// Step 3: prune in Go via the shared helper. Same prune semantics

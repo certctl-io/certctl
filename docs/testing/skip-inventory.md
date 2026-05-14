@@ -4,12 +4,12 @@
 <!-- Re-run after adding or removing any t.Skip(). CI guard:    -->
 <!-- scripts/ci-guards/skip-inventory-drift.sh                  -->
 
-> Last reviewed: 2026-05-13
+> Last reviewed: 2026-05-14
 
 ## Summary
 
-- Total t.Skip sites: **142**
-- testing.Short() guards: **76** (these gate behind `go test -short`)
+- Total t.Skip sites: **144**
+- testing.Short() guards: **78** (these gate behind `go test -short`)
 
 Re-run inventory with: `./scripts/skip-inventory.sh`.
 
@@ -156,6 +156,8 @@ Re-run inventory with: `./scripts/skip-inventory.sh`.
 
 ### `internal/ratelimit`
 
+- `internal/ratelimit/equivalence_test.go:80` — t.Skip("race-style test under -short")
+- `internal/ratelimit/equivalence_test.go:88` — t.Skip("postgres equivalence tests require testcontainers; skipped under -short")
 - `internal/ratelimit/sliding_window_test.go:146` — t.Skip("race-style test under -short")
 
 ### `internal/repository/postgres`
