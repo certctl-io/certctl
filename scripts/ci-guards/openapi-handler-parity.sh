@@ -14,20 +14,31 @@
 # (openapi-rest-deferred-monotonic.sh) against a checked-in baseline
 # at api/openapi-handler-exceptions-baseline.txt.
 #
-# Current state (2026-05-14):
+# Current state (post-Sprint-13.7 / 2026-05-14):
 #   220 r.Register / r.mux.Handle call sites in internal/api/router/router.go
-#   158 operationIds in api/openapi.yaml
-#    64 documented exceptions (36 wire-protocol + 28 rest-deferred)
+#   186 operationIds in api/openapi.yaml
+#    36 documented exceptions (36 wire-protocol + 0 rest-deferred)
 #     0 unaccounted router routes — guard passes clean today.
 #
-# Sprints 13.4-13.6 drive rest-deferred to zero by authoring OpenAPI ops
-# for the 28 REST-shaped routes; each batch deletes the corresponding
-# exception entries + bumps the baseline file downward. Sprint 13.7
-# tightens this guard's rest-deferred floor from "monotonic-decrease"
-# (sibling guard) to a hard zero-exact pin (this guard).
+# Sprints 13.4-13.6 drove rest-deferred to zero by authoring 28 OpenAPI
+# ops + deleting the corresponding exception entries. Sprint 13.7
+# (this comment-block update + the inline fail-on-rest-deferred check
+# at the bottom of the python block) tightens this guard's
+# rest-deferred floor from "monotonic-decrease vs baseline" (the
+# sibling guard openapi-rest-deferred-monotonic.sh) to a HARD
+# zero-exact pin. The `category: rest-deferred` escape hatch is now
+# closed for good: any future PR adding a new REST route MUST author
+# its OpenAPI op or fail CI.
+#
+# The sibling monotonic-decrease guard stays in tree as belt-and-
+# suspenders — both must hold. The monotonic guard catches baseline-
+# drift accidents (e.g. an operator manually edits the baseline up
+# without surfacing the rationale); this guard catches the underlying
+# rest-deferred bucket re-growing at all.
 #
 # Going forward: any new gap (in either direction) fails the build
-# unless documented in the exceptions YAML with a category.
+# unless documented in the exceptions YAML with category=wire-protocol
+# (carry an RFC anchor in `why:` for review-time scrutiny).
 #
 # Subcommand:
 #   bash scripts/ci-guards/openapi-handler-parity.sh
@@ -122,13 +133,35 @@ if missing_category:
         print(f"  {r}")
     print()
     print("Add `category: wire-protocol` (with an RFC anchor in `why:`) or")
-    print("`category: rest-deferred` (OpenAPI op deferred) to each entry.")
+    print("author the route's OpenAPI op (the rest-deferred bucket is now")
+    print("pinned at zero — see Phase 13 Sprint 13.7 closure).")
     fail = True
 
 if unknown_category:
     print(f"::error::api/openapi-handler-exceptions.yaml: {len(unknown_category)} entries with unknown category value (must be wire-protocol or rest-deferred):")
     for r, c in unknown_category:
         print(f"  {r}  → category: {c}")
+    fail = True
+
+# Phase 13 Sprint 13.7 — hard zero-exact pin on the rest-deferred
+# bucket. ARCH-H1's substantive close requires that the bucket stay
+# empty in perpetuity: any new REST route MUST land with an
+# OpenAPI op. Categorizing a new exception as `category: rest-deferred`
+# is no longer an escape hatch — it fails CI immediately, surfacing
+# the route + suggesting the fix.
+if bucket_counts['rest-deferred'] > 0:
+    print(f"::error::rest-deferred bucket is non-empty ({bucket_counts['rest-deferred']} entries) — Phase 13 Sprint 13.7 closure pins this at zero.")
+    print()
+    print("Every entry in api/openapi-handler-exceptions.yaml with")
+    print("`category: rest-deferred` represents a REST-shaped route whose")
+    print("OpenAPI op was deferred. Author the OpenAPI op in api/openapi.yaml")
+    print("with a request/response schema mirroring the Go handler's")
+    print("projection types, then delete the exception entry.")
+    print()
+    print("Offending entries:")
+    for entry in (exc_doc.get('documented_exceptions') or []):
+        if entry.get('category') == 'rest-deferred':
+            print(f"  {entry['route']}")
     fail = True
 
 # Routes in router but NOT in openapi AND NOT in exceptions = drift
