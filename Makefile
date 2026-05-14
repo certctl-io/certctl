@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build e2e-test qa-stats
+.PHONY: help build run test lint verify verify-deploy loadtest loadtest-scale loadtest-scale-bulk loadtest-scale-acme loadtest-scale-agent acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build e2e-test qa-stats
 
 # Default target - show help
 help:
@@ -152,6 +152,49 @@ loadtest:
 	@echo ""
 	@echo "==> results landed in deploy/test/loadtest/results/"
 	@if [ -f deploy/test/loadtest/results/summary.txt ]; then cat deploy/test/loadtest/results/summary.txt; fi
+
+# Phase 8 SCALE-H2 — scale-tier load tests. Profile-gated in the
+# loadtest compose so the default `make loadtest` stays fast and
+# focused on the per-PR regression scope (API tier + connector tier).
+#
+# loadtest-scale-bulk runs the 10K-cert bulk-renew scenario.
+# loadtest-scale-acme runs the 200-VU ACME directory/nonce/ARI burst.
+# loadtest-scale-agent runs the 5K-agent heartbeat storm.
+#
+# Each target uses --exit-code-from <scenario-driver> so a threshold
+# breach surfaces as a non-zero make exit. The scale-seed init runs
+# once per invocation (idempotent via ON CONFLICT) so re-running a
+# target against the same compose stack is fine.
+loadtest-scale-bulk:
+	@echo "==> Phase 8 SCALE-H2: bulk-renewal scenario (10K cert fixture, ~6m)"
+	@cd deploy/test/loadtest && docker compose --profile scale up --build \
+	  --abort-on-container-exit --exit-code-from k6-scale-bulk
+	@echo ""
+	@echo "==> results: deploy/test/loadtest/results/summary-bulk-renewal.{json,txt}"
+	@if [ -f deploy/test/loadtest/results/summary-bulk-renewal.txt ]; then \
+	  cat deploy/test/loadtest/results/summary-bulk-renewal.txt; fi
+
+loadtest-scale-acme:
+	@echo "==> Phase 8 SCALE-H2: ACME enrollment burst (200 VU, ~6m)"
+	@cd deploy/test/loadtest && docker compose --profile scale up --build \
+	  --abort-on-container-exit --exit-code-from k6-scale-acme
+	@echo ""
+	@echo "==> results: deploy/test/loadtest/results/summary-acme-burst.{json,txt}"
+	@if [ -f deploy/test/loadtest/results/summary-acme-burst.txt ]; then \
+	  cat deploy/test/loadtest/results/summary-acme-burst.txt; fi
+
+loadtest-scale-agent:
+	@echo "==> Phase 8 SCALE-H2: agent heartbeat storm (5K agent fixture, ~6m)"
+	@cd deploy/test/loadtest && docker compose --profile scale up --build \
+	  --abort-on-container-exit --exit-code-from k6-scale-agent
+	@echo ""
+	@echo "==> results: deploy/test/loadtest/results/summary-agent-storm.{json,txt}"
+	@if [ -f deploy/test/loadtest/results/summary-agent-storm.txt ]; then \
+	  cat deploy/test/loadtest/results/summary-agent-storm.txt; fi
+
+# All three Phase 8 scenarios serially. Use the matrix in
+# .github/workflows/loadtest.yml for parallel CI runs.
+loadtest-scale: loadtest-scale-bulk loadtest-scale-acme loadtest-scale-agent
 
 # Auth Bundle 2 Phase 10 — Keycloak end-to-end OIDC integration test.
 # Boots a Keycloak container via testcontainers-go (quay.io/keycloak:25.0),

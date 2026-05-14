@@ -351,3 +351,128 @@ services:
       - run
       - --summary-export=/results/summary.json
       - /scripts/k6.js
+
+  # ===========================================================================
+  # Phase 8 SCALE-H2 — scale-tier scenarios (opt-in via `--profile scale`).
+  #
+  # The default `make loadtest` path runs the API tier + connector tier
+  # scenarios above against the demo-scale seed. The Phase 8 scenarios are
+  # heavier (10K cert + 5K agent fixtures) and would slow the default path
+  # without serving the per-PR signal the existing run targets, so they live
+  # behind a separate compose profile.
+  #
+  # Three components, all profile-gated:
+  #   1. scale-seed    — one-shot init that runs ./seed/*.sql against the
+  #                      same postgres the server uses. Idempotent.
+  #   2. k6-scale-bulk / k6-scale-acme / k6-scale-agent — one driver each
+  #                      for the three Phase 8 scenarios. The matrix dispatch
+  #                      in .github/workflows/loadtest.yml picks one per job.
+  #
+  # Run a single scale scenario locally:
+  #   docker compose --profile scale up \
+  #       --abort-on-container-exit --exit-code-from k6-scale-bulk \
+  #       scale-seed k6-scale-bulk
+  # ===========================================================================
+
+  scale-seed:
+    # postgres:16-alpine bundles psql; no extra image needed.
+    image: postgres:16-alpine
+    container_name: certctl-loadtest-scale-seed
+    restart: "no"
+    profiles: ["scale"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Wait for certctl-server to be healthy — the server runs schema
+      # migrations + seed_demo.sql at boot. The Phase 8 seeds reference
+      # FKs (iss-local, o-alice, t-platform, rp-standard) that
+      # seed_demo.sql creates, so the order MUST be:
+      #   postgres up → server runs migrations + seed_demo.sql → scale-seed runs
+      certctl-server:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: certctl
+      PGPASSWORD: loadtestpass
+      PGDATABASE: certctl
+    volumes:
+      - ./seed:/seed:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -eu
+        echo "==> Phase 8 scale-seed: running SQL fixtures (lexical order)"
+        for f in /seed/*.sql; do
+            echo "----> $$f"
+            psql -v ON_ERROR_STOP=1 -f "$$f"
+        done
+        echo "==> Phase 8 scale-seed: complete"
+
+  k6-scale-bulk:
+    image: grafana/k6:0.54.0
+    container_name: certctl-loadtest-k6-bulk
+    profiles: ["scale"]
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+      scale-seed:
+        condition: service_completed_successfully
+    environment:
+      CERTCTL_BASE: https://certctl-server:8443
+      CERTCTL_TOKEN: load-test-token
+      K6_INSECURE_SKIP_TLS_VERIFY: "true"
+    volumes:
+      - ./k6/bulk_renewal.js:/scripts/bulk_renewal.js:ro
+      - ./results:/results
+    command:
+      - run
+      - --summary-export=/results/summary-bulk-renewal.json
+      - /scripts/bulk_renewal.js
+
+  k6-scale-acme:
+    image: grafana/k6:0.54.0
+    container_name: certctl-loadtest-k6-acme
+    profiles: ["scale"]
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+      # ACME scenario doesn't depend on the SQL seeds (it hits the
+      # unauthenticated directory + nonce + ARI surface) but routing
+      # it through the same dependency chain keeps the compose
+      # ordering predictable across the three scale jobs.
+      scale-seed:
+        condition: service_completed_successfully
+    environment:
+      CERTCTL_ACME_DIRECTORY: https://certctl-server:8443/acme/profile/prof-test/directory
+      K6_INSECURE_SKIP_TLS_VERIFY: "true"
+    volumes:
+      - ./k6/acme_burst.js:/scripts/acme_burst.js:ro
+      - ./results:/results
+    command:
+      - run
+      - --summary-export=/results/summary-acme-burst.json
+      - /scripts/acme_burst.js
+
+  k6-scale-agent:
+    image: grafana/k6:0.54.0
+    container_name: certctl-loadtest-k6-agent
+    profiles: ["scale"]
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+      scale-seed:
+        condition: service_completed_successfully
+    environment:
+      CERTCTL_BASE: https://certctl-server:8443
+      CERTCTL_TOKEN: load-test-token
+      K6_INSECURE_SKIP_TLS_VERIFY: "true"
+      # Match the seed's 5K-agent fleet.
+      K6_AGENT_FLEET: "5000"
+    volumes:
+      - ./k6/agent_storm.js:/scripts/agent_storm.js:ro
+      - ./results:/results
+    command:
+      - run
+      - --summary-export=/results/summary-agent-storm.json
+      - /scripts/agent_storm.js

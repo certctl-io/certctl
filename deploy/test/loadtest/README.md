@@ -352,8 +352,35 @@ the ACME flow scenario. Operators with kind / cert-manager available
 should pair this with `make acme-cert-manager-test` for end-to-end
 verification.
 
+## Scale tier (Phase 8 SCALE-H2, 2026-05-14)
+
+Phase 8 closure added three new k6 scenarios that exercise the
+scale-relevant load surfaces the API tier and connector tier left
+uncovered:
+
+| Scenario | k6 file | Seed | Make target |
+|---|---|---|---|
+| Bulk-renewal under load | `k6/bulk_renewal.js` | `seed/01_bulk_renewal_certs.sql` (10K certs) | `make loadtest-scale-bulk` |
+| ACME enrollment burst | `k6/acme_burst.js` | (none — unauth surface) | `make loadtest-scale-acme` |
+| Agent heartbeat storm | `k6/agent_storm.js` | `seed/02_agent_fleet.sql` (5K agents) | `make loadtest-scale-agent` |
+
+The scale-tier scenarios live behind the `scale` compose profile so
+the default `make loadtest` (API tier + connector tier, ~7 min)
+stays fast. Run all three serially with `make loadtest-scale`, or
+trigger the `loadtest.yml` workflow's `k6-scale` matrix jobs from
+the Actions tab for canonical-hardware capture.
+
+Operator-facing baseline table + threshold contracts + documented
+limitations live in [`docs/operator/scale.md`](../../../docs/operator/scale.md)
+under the "Scale-tier scenarios (SCALE-H2, Phase 8)" section. Treat
+that as the canonical source — this README only links.
+
+The seed fixtures + their idempotency contract are documented in
+[`seed/README.md`](seed/README.md).
+
 ## Audit references
 
 - API tier:       2026-05-01 issuer coverage audit fix #8.
 - Connector tier: 2026-05-02 deployment-target audit Bundle 10.
 - ACME flows:     Phase 5 master prompt (project notes).
+- Scale tier:     2026-05-14 architecture diligence Phase 8 (SCALE-H2).

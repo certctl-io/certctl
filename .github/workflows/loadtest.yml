@@ -75,3 +75,65 @@ jobs:
           name: k6-summary-${{ github.run_id }}
           path: deploy/test/loadtest/results/
           retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # Phase 8 SCALE-H2 — scale-tier scenarios. Three new k6 drivers:
+  #   - bulk-renewal: 10K-cert seed + criteria-mode POST /bulk-renew
+  #   - acme-burst:   200 concurrent VUs against directory/nonce/ARI
+  #   - agent-storm:  5K-agent seed + 167 heartbeats/sec sustained
+  #
+  # Matrix dispatch so each scenario runs on its own runner and a
+  # regression in one doesn't mask another. The matrix runs in parallel,
+  # which keeps total wall time around the existing 25-minute cap rather
+  # than ~70 minutes serialised. Each scenario brings up the full
+  # loadtest compose stack independently — there's no shared state
+  # between scenarios that would benefit from a single-runner serial
+  # invocation.
+  #
+  # Cadence: same as the API + connector tier job above (workflow_dispatch
+  # + Mondays 06:00 UTC). The scale scenarios DO produce useful per-PR
+  # signal in theory, but the per-run cost (image build + 5min run × 3)
+  # is too high to gate on every PR; weekly is the right trade-off.
+  # ---------------------------------------------------------------------------
+  k6-scale:
+    name: k6 scale tier (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: k6
+    strategy:
+      # Parallel: a failure in one scenario shouldn't cancel the others.
+      # Each scenario's threshold breach is independent diagnostic data.
+      fail-fast: false
+      matrix:
+        scenario:
+          - bulk-renewal
+          - acme-burst
+          - agent-storm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+
+      - name: Run scale loadtest (${{ matrix.scenario }})
+        env:
+          BUILDKIT_PROGRESS: plain
+        run: |
+          case "${{ matrix.scenario }}" in
+            bulk-renewal) make loadtest-scale-bulk ;;
+            acme-burst)   make loadtest-scale-acme ;;
+            agent-storm)  make loadtest-scale-agent ;;
+            *) echo "::error::unknown scenario ${{ matrix.scenario }}"; exit 1 ;;
+          esac
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          # Per-scenario artifact name so the three matrix runs don't
+          # collide on upload.
+          name: k6-scale-${{ matrix.scenario }}-${{ github.run_id }}
+          path: deploy/test/loadtest/results/
+          retention-days: 90

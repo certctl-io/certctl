@@ -121,6 +121,116 @@ endpoint and repeat the request with the same value in an
 `If-None-Match:` header — the second request should return 304 with
 an empty body.
 
+## Scale-tier scenarios (SCALE-H2, Phase 8)
+
+Phase 8 (2026-05-14) extended the k6 load-test harness with three new
+scenarios that exercise the scale-relevant load surfaces the original
+API tier left uncovered. They live behind a compose profile gate
+(`docker compose --profile scale`) so the default `make loadtest`
+stays focused on per-PR regression scope. The full set runs weekly on
+the same `loadtest.yml` cron as the API + connector tier.
+
+| Scenario | k6 file | Seed fixture | Sustained load |
+|---|---|---|---|
+| Bulk-renewal under load | `deploy/test/loadtest/k6/bulk_renewal.js` | 10,000 managed_certificates (`seed/01_bulk_renewal_certs.sql`) | 5 req/s POST `/api/v1/certificates/bulk-renew` × 5 min |
+| ACME enrollment burst | `deploy/test/loadtest/k6/acme_burst.js` | (none — unauth surface) | 200 concurrent VUs × directory/nonce/ARI × 5 min |
+| Agent heartbeat storm | `deploy/test/loadtest/k6/agent_storm.js` | 5,000 agents (`seed/02_agent_fleet.sql`) | 167 req/s POST `/api/v1/agents/{id}/heartbeat` × 5 min |
+
+### Threshold contracts (regression guards, NOT measured baselines)
+
+| Scenario | Metric | Threshold |
+|---|---|---|
+| Bulk-renewal | `http_req_duration{scenario:bulk_renewal}` p99 | < 5 s |
+| Bulk-renewal | `http_req_duration{scenario:bulk_renewal}` p95 | < 2 s |
+| Bulk-renewal | `http_req_failed{scenario:bulk_renewal}` | < 1% |
+| ACME burst | `acme_directory_duration` p95 | < 500 ms |
+| ACME burst | `acme_new_nonce_duration` p95 | < 300 ms |
+| ACME burst | `acme_renewal_info_duration` p95 | < 800 ms |
+| ACME burst | `http_req_failed{server_error:true}` 5xx-only | < 0.1% |
+| Agent storm | `http_req_duration{scenario:agent_storm}` p99 | < 1 s |
+| Agent storm | `http_req_duration{scenario:agent_storm}` p95 | < 500 ms |
+| Agent storm | `http_req_failed{scenario:agent_storm}` | < 0.1% |
+
+429 rate-limit responses on the ACME burst are EXPECTED — Phase 5's
+per-account rate limiter SHOULD fire at sustained 200-VU pressure.
+The custom `acme_rate_limited_count` Counter tracks how often it
+fires; `acme_rate_limit_shape_ok` Counter verifies every 429 returns
+the RFC 7807 `application/problem+json` shape with the
+`urn:ietf:params:acme:error:rateLimited` type. A regression that
+returned plain-text 429 or a different problem type would surface as
+`(rate_limited_count - shape_ok_count) > 0` in the summary.
+
+### Measured baseline — TBD pending canonical-hardware capture
+
+The Phase 8 scenarios shipped 2026-05-14. Baseline capture on a
+canonical `ubuntu-latest` GitHub runner is the next operational step;
+until then, the table below holds TBD placeholders. **Do NOT publish
+sandbox-captured numbers here** — the same anti-pattern the original
+loadtest README guards against (sandbox-aggregate placeholder vs
+canonical hardware) applies to Phase 8.
+
+| Scenario | p50 | p95 | p99 | Error rate | Date measured | Commit |
+|---|---|---|---|---|---|---|
+| **bulk_renewal** | TBD | TBD | TBD | TBD | — | — |
+| **acme_burst** directory | TBD | TBD | TBD | TBD | — | — |
+| **acme_burst** new-nonce | TBD | TBD | TBD | TBD | — | — |
+| **acme_burst** renewal-info | TBD | TBD | TBD | TBD | — | — |
+| **agent_storm** | TBD | TBD | TBD | TBD | — | — |
+
+Capture procedure: trigger `loadtest.yml` from the Actions tab against
+the current `master` SHA; wait for the `k6-scale` matrix jobs to
+complete; download the per-scenario summary artifacts; copy p50/p95/
+p99 from `summary-<scenario>.json` into the table; commit the
+captured numbers alongside the date + SHA. Replace this paragraph
+with the captured-on row when the first canonical run lands.
+
+### How to run the scale tier locally
+
+```sh
+# All three scenarios serially (~18 min total):
+make loadtest-scale
+
+# Individual scenarios (each ~6 min):
+make loadtest-scale-bulk     # 10K cert bulk-renew
+make loadtest-scale-acme     # 200 VU ACME burst
+make loadtest-scale-agent    # 5K agent heartbeat storm
+```
+
+Each scenario boots its own copy of the loadtest compose stack
+(postgres + tls-init + certctl-server) plus the `scale-seed` init
+container that runs the SQL fixtures from `deploy/test/loadtest/seed/`.
+The seed is idempotent (`ON CONFLICT … DO NOTHING`) so re-running a
+scenario against the same compose stack is cheap.
+
+### Documented limitations of the scale tier
+
+- **JWS-signed ACME flows are not measured.** The ACME burst scenario
+  hits the unauthenticated directory + new-nonce + ARI surface only.
+  Measuring the JWS-signed POST hot path (new-account / new-order /
+  finalize) requires bundling a JWS signer into the k6 driver (k6
+  doesn't ship JWS). End-to-end JWS conformance is gated by
+  `make acme-rfc-conformance-test` which drives `lego` against the
+  same stack.
+- **Scheduler renewal scan throughput.** The bulk-renewal scenario
+  measures the inbound POST throughput; the scheduler's
+  `jobProcessorLoop` drains the enqueued jobs at a fixed per-tick
+  budget (`CERTCTL_RENEWAL_CONCURRENCY=25` default), and the
+  throughput of that path is not amplified by adding more inbound
+  bulk-renew calls. A future scenario could pull
+  `/api/v1/jobs?status=pending` and measure drain time.
+- **Production-sized Postgres.** The compose stack runs
+  `postgres:16-alpine` with default config on a CI runner.
+  Production deploys with `shared_buffers >= 1 GiB` + dedicated
+  Postgres VM will have different query plans for the 10K-cert
+  scan. The captured numbers translate directionally but the
+  absolute ceiling is workload-specific — see the operator-tune
+  ladder above for production sizing.
+- **Pull-only deployment model.** Agent CSR submit, work-poll, and
+  deploy-verify paths are intentionally out of scope. The heartbeat
+  storm exercises the highest-frequency call on a typical fleet;
+  the work-poll path runs at the same cadence but is cheap (empty
+  set returned 99% of the time).
+
 ## Profiling production
 
 When the above ladder doesn't fit your shape, profile against your
