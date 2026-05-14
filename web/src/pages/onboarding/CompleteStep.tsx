@@ -72,10 +72,17 @@ export default function CompleteStep({ onFinish, issuerName, certName }: {
         Go to Dashboard
       </button>
 
+      {/* Doc links updated 2026-05-14 to match the post-2026-05-04
+          audience-organized doc tree (getting-started/ + reference/).
+          Pre-fix the three links pointed at docs/quickstart.md,
+          docs/architecture.md, docs/connectors.md — none of those paths
+          exist any more; they were 404s the operator hit on every
+          successful onboarding completion. Verified against `ls docs/`
+          before writing. */}
       <div className="flex justify-center gap-6 text-xs">
-        <a href="https://github.com/certctl-io/certctl/blob/master/docs/quickstart.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Quickstart Guide</a>
-        <a href="https://github.com/certctl-io/certctl/blob/master/docs/architecture.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Architecture</a>
-        <a href="https://github.com/certctl-io/certctl/blob/master/docs/connectors.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Connectors</a>
+        <a href="https://github.com/certctl-io/certctl/blob/master/docs/getting-started/quickstart.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Quickstart Guide</a>
+        <a href="https://github.com/certctl-io/certctl/blob/master/docs/reference/architecture.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Architecture</a>
+        <a href="https://github.com/certctl-io/certctl/blob/master/docs/reference/connectors/index.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Connectors</a>
       </div>
     </div>
   );

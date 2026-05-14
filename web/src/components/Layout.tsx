@@ -284,38 +284,32 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Maintainer attribution row — mirrors the landing-page footer
-            (certctl.io: "Built and maintained by Shankar · certctl.io").
-            Same font-mono / muted-text typography; only "Shankar" carries
-            the LinkedIn link (the same href + rel="me noopener" pattern
-            the landing page uses). Single-maintainer OSS standard
-            (Cal.com, Plausible, Beekeeper Studio do the same). */}
-        {/* Maintainer attribution row. The Bundle-8 L-015 CI guard line-greps
-            for `target="_blank"` without `rel="noopener noreferrer"` on the
-            SAME LINE — splitting target + rel across lines (as the prior
-            bare <a> did) tripped the guard. ExternalLink is the canonical
-            chokepoint that the guard allowlists. We lose the rel="me" hint
-            (LinkedIn's identity-claim signal, not load-bearing), but gain
-            the CI gate. */}
-        <div className="px-5 pt-3 pb-1 border-t border-white/10">
-          <span className="text-2xs text-sidebar-text/70 font-mono">
-            Built and maintained by{' '}
-            <ExternalLink
-              href="https://www.linkedin.com/in/shankar-k-a1b6853ba"
-              className="text-sidebar-text/90 hover:text-white transition-colors underline-offset-2 hover:underline"
-              title="Shankar on LinkedIn — opens in a new tab"
-            >
-              Shankar
-            </ExternalLink>
-          </span>
-        </div>
-
-        <div className="px-5 pt-1 pb-3 flex items-center justify-between">
-          <span className="text-2xs text-brand-300/60 font-mono">certctl</span>
+        {/* Sidebar footer (post-2026-05-14 simplification per operator).
+            Pre-fix the footer had two rows: the maintainer attribution
+            (with only "Shankar" linked) PLUS a "certctl" font-mono label
+            sitting next to the logout button. Operator dropped the
+            "certctl" label as redundant (the brand mark + product name
+            are already in the sidebar header), so this single row is
+            the entire footer:
+              • Whole "Built and maintained by Shankar" line is the
+                LinkedIn link — routes through ExternalLink so the
+                rel="noopener noreferrer" pair is auto-emitted on the
+                same line + the Bundle-8 L-015 CI guard stays green.
+              • Logout sits flush-right on the same row, separated
+                visually by justify-between flex layout. Only renders
+                when authRequired is true. */}
+        <div className="px-5 pt-3 pb-3 border-t border-white/10 flex items-center justify-between gap-3">
+          <ExternalLink
+            href="https://www.linkedin.com/in/shankar-k-a1b6853ba"
+            className="text-2xs text-sidebar-text/80 hover:text-white font-mono underline-offset-2 hover:underline transition-colors"
+            title="Shankar on LinkedIn — opens in a new tab"
+          >
+            Built and maintained by Shankar
+          </ExternalLink>
           {authRequired && (
             <button
               onClick={logout}
-              className="text-xs text-sidebar-text hover:text-white transition-colors"
+              className="text-xs text-sidebar-text hover:text-white transition-colors shrink-0"
               title="Sign out"
               aria-label="Sign out"
             >
