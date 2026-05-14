@@ -203,8 +203,12 @@ func TestLoad_DefaultValues(t *testing.T) {
 	if cfg.Database.URL != "postgres://localhost/certctl" {
 		t.Errorf("Database.URL = %q, want default", cfg.Database.URL)
 	}
-	if cfg.Database.MaxConnections != 25 {
-		t.Errorf("Database.MaxConnections = %d, want 25", cfg.Database.MaxConnections)
+	// Phase 6 SCALE-M1 (2026-05-14): default bumped from 25 → 50 to
+	// relieve pool-saturation pressure on 1K+ agent fleets. The
+	// CERTCTL_DATABASE_MAX_CONNS override still works for operators
+	// who want the smaller value back; this test pins the default.
+	if cfg.Database.MaxConnections != 50 {
+		t.Errorf("Database.MaxConnections = %d, want 50", cfg.Database.MaxConnections)
 	}
 }
 

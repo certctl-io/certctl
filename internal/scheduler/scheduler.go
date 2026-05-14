@@ -473,7 +473,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 // If an error occurs, it logs the error but continues running.
 // Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
 func (s *Scheduler) renewalCheckLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.renewalCheckInterval)
+	ticker := NewJitteredTicker(s.renewalCheckInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -522,7 +522,7 @@ func (s *Scheduler) runRenewalCheck(ctx context.Context) {
 // If an error occurs, it logs the error but continues running.
 // Uses atomic.Bool to prevent duplicate execution if the previous job is still running.
 func (s *Scheduler) jobProcessorLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.jobProcessorInterval)
+	ticker := NewJitteredTicker(s.jobProcessorInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -573,7 +573,7 @@ func (s *Scheduler) runJobProcessor(ctx context.Context) {
 // Uses atomic.Bool to prevent duplicate execution if the previous retry sweep
 // is still running.
 func (s *Scheduler) jobRetryLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.jobRetryInterval)
+	ticker := NewJitteredTicker(s.jobRetryInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -628,7 +628,7 @@ func (s *Scheduler) runJobRetry(ctx context.Context) {
 // retry loop then auto-promotes eligible Failed jobs back to Pending. Closes
 // coverage gap I-003. Uses atomic.Bool to prevent duplicate execution.
 func (s *Scheduler) jobTimeoutLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.jobTimeoutInterval)
+	ticker := NewJitteredTicker(s.jobTimeoutInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -706,7 +706,7 @@ func (s *Scheduler) runJobTimeout(ctx context.Context) {
 // If an error occurs, it logs the error but continues running.
 // Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
 func (s *Scheduler) agentHealthCheckLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.agentHealthCheckInterval)
+	ticker := NewJitteredTicker(s.agentHealthCheckInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -754,7 +754,7 @@ func (s *Scheduler) runAgentHealthCheck(ctx context.Context) {
 // If an error occurs, it logs the error but continues running.
 // Uses atomic.Bool to prevent duplicate execution if the previous process is still running.
 func (s *Scheduler) notificationProcessLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.notificationProcessInterval)
+	ticker := NewJitteredTicker(s.notificationProcessInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -806,7 +806,7 @@ func (s *Scheduler) runNotificationProcess(ctx context.Context) {
 // Uses atomic.Bool to prevent duplicate execution if the previous retry sweep
 // is still running. Mirrors the I-001 jobRetryLoop topology byte-for-byte.
 func (s *Scheduler) notificationRetryLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.notificationRetryInterval)
+	ticker := NewJitteredTicker(s.notificationRetryInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -861,7 +861,7 @@ func (s *Scheduler) runNotificationRetry(ctx context.Context) {
 // no CRL/OCSP needed.
 // Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
 func (s *Scheduler) shortLivedExpiryCheckLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.shortLivedExpiryCheckInterval)
+	ticker := NewJitteredTicker(s.shortLivedExpiryCheckInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -909,7 +909,7 @@ func (s *Scheduler) runShortLivedExpiryCheck(ctx context.Context) {
 // of configured network targets.
 // Uses atomic.Bool to prevent duplicate execution if the previous scan is still running.
 func (s *Scheduler) networkScanLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.networkScanInterval)
+	ticker := NewJitteredTicker(s.networkScanInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -956,7 +956,7 @@ func (s *Scheduler) runNetworkScan(ctx context.Context) {
 // digestLoop runs every digestInterval and generates/sends certificate digest emails.
 // Uses atomic.Bool to prevent duplicate execution if the previous digest is still running.
 func (s *Scheduler) digestLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.digestInterval)
+	ticker := NewJitteredTicker(s.digestInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Do NOT run immediately on start for digest — wait for the first tick.
@@ -999,7 +999,7 @@ func (s *Scheduler) runDigest(ctx context.Context) {
 // resource-intensive. Wait for the first tick.
 // Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
 func (s *Scheduler) healthCheckLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.healthCheckInterval)
+	ticker := NewJitteredTicker(s.healthCheckInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Do NOT run immediately on start for health checks — wait for the first tick.
@@ -1041,7 +1041,7 @@ func (s *Scheduler) runHealthCheck(ctx context.Context) {
 // Runs immediately on start, then on each tick. Same idempotency pattern as networkScanLoop.
 // Uses atomic.Bool to prevent duplicate execution if the previous scan is still running.
 func (s *Scheduler) cloudDiscoveryLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.cloudDiscoveryInterval)
+	ticker := NewJitteredTicker(s.cloudDiscoveryInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Run immediately on start (with idempotency guard)
@@ -1121,7 +1121,7 @@ func (s *Scheduler) WaitForCompletion(timeout time.Duration) error {
 //
 // Bundle CRL/OCSP-Responder Phase 3.
 func (s *Scheduler) crlGenerationLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.crlGenerationInterval)
+	ticker := NewJitteredTicker(s.crlGenerationInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	// Do NOT run immediately on start. CRLs are typically valid for
@@ -1171,7 +1171,7 @@ var ErrSchedulerShutdownTimeout = errors.New("scheduler graceful shutdown timeou
 // sync.WaitGroup tracks the in-flight goroutine for graceful shutdown.
 // Phase 5.
 func (s *Scheduler) acmeGCLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.acmeGCInterval)
+	ticker := NewJitteredTicker(s.acmeGCInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	for {
@@ -1212,7 +1212,7 @@ func (s *Scheduler) acmeGCLoop(ctx context.Context) {
 // file: a stuck Postgres can't block the next tick, and concurrent
 // sweeps are skipped not queued.
 func (s *Scheduler) sessionGCLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.sessionGCInterval)
+	ticker := NewJitteredTicker(s.sessionGCInterval, DefaultSchedulerJitter)
 	defer ticker.Stop()
 
 	for {

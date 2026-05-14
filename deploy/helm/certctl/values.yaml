@@ -482,8 +482,9 @@ agent:
   #
   # Phase 4 DEPL-M5 (2026-05-14): per-fleet-size tuning ladder for the
   # agent. Defaults are sized for the standard "one cert per host"
-  # operating pattern: the agent polls the server every 60s (default
-  # CERTCTL_AGENT_POLL_INTERVAL), generates ECDSA P-256 keys locally on
+  # operating pattern: the agent polls the server every 30 seconds
+  # (hardcoded in cmd/agent/main.go::pollInterval — not yet
+  # env-configurable), generates ECDSA P-256 keys locally on
   # issuance/renewal events, and is otherwise idle. CPU is bursty only
   # during keygen + CSR submission.
   #

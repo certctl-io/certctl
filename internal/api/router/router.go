@@ -11,6 +11,23 @@ import (
 	"github.com/certctl-io/certctl/internal/auth"
 )
 
+// etagged wraps a list-endpoint handler with the SCALE-L2 ETag
+// middleware. Phase 6 SCALE-L2 closure (2026-05-14): the top-5
+// read-heavy list endpoints (/certificates, /jobs, /agents,
+// /audit, /discovered-certificates) get ETag + If-None-Match
+// short-circuit to avoid re-running their SELECT COUNT(*) +
+// row-marshaling pass on every dashboard poll. The helper chains
+// ETag around an already-rbac-gated handler so order is:
+//
+//	request → ETag → rbacGate → handler
+//
+// (auth runs BEFORE the cache check; we never short-circuit a
+// 304 to an unauthenticated request. The middleware emits ETag
+// only on 2xx responses, so 401s/403s never get cached.)
+func etagged(h http.Handler) http.Handler {
+	return middleware.ETag(h)
+}
+
 // rbacGate wraps a handler with auth.RequirePermission(checker, perm,
 // nil) — i.e. a GLOBAL-SCOPE permission check. Used by RegisterHandlers
 // to gate every state-changing + read endpoint. When checker is nil the
@@ -567,7 +584,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /api/v1/est/certificates/bulk-revoke", rbacGate(reg.Checker, "cert.bulk_revoke", reg.BulkRevocation.BulkRevokeEST))
 	r.Register("POST /api/v1/certificates/bulk-renew", rbacGate(reg.Checker, "cert.issue", reg.BulkRenewal.BulkRenew))
 	r.Register("POST /api/v1/certificates/bulk-reassign", rbacGate(reg.Checker, "cert.edit", reg.BulkReassignment.BulkReassign))
-	r.Register("GET /api/v1/certificates", rbacGate(reg.Checker, "cert.read", reg.Certificates.ListCertificates))
+	r.Register("GET /api/v1/certificates", etagged(rbacGate(reg.Checker, "cert.read", reg.Certificates.ListCertificates)))
 	r.Register("POST /api/v1/certificates", rbacGate(reg.Checker, "cert.issue", reg.Certificates.CreateCertificate))
 	r.Register("GET /api/v1/certificates/{id}", rbacGate(reg.Checker, "cert.read", reg.Certificates.GetCertificate))
 	r.Register("PUT /api/v1/certificates/{id}", rbacGate(reg.Checker, "cert.edit", reg.Certificates.UpdateCertificate))
@@ -619,7 +636,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	//   * DELETE /api/v1/agents/{id} — RetireAgent. Replaces the pre-I-004
 	//     hard-delete; the underlying repo does a soft-retire with
 	//     optional cascade.
-	r.Register("GET /api/v1/agents", rbacGate(reg.Checker, "agent.read", reg.Agents.ListAgents))
+	r.Register("GET /api/v1/agents", etagged(rbacGate(reg.Checker, "agent.read", reg.Agents.ListAgents)))
 	r.Register("POST /api/v1/agents", rbacGate(reg.Checker, "agent.edit", reg.Agents.RegisterAgent))
 	r.Register("GET /api/v1/agents/retired", rbacGate(reg.Checker, "agent.read", reg.Agents.ListRetiredAgents))
 	r.Register("GET /api/v1/agents/{id}", rbacGate(reg.Checker, "agent.read", reg.Agents.GetAgent))
@@ -631,7 +648,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /api/v1/agents/{id}/jobs/{job_id}/status", rbacGate(reg.Checker, "agent.job.complete", reg.Agents.AgentReportJobStatus))
 
 	// Jobs routes: /api/v1/jobs
-	r.Register("GET /api/v1/jobs", rbacGate(reg.Checker, "job.read", reg.Jobs.ListJobs))
+	r.Register("GET /api/v1/jobs", etagged(rbacGate(reg.Checker, "job.read", reg.Jobs.ListJobs)))
 	r.Register("GET /api/v1/jobs/{id}", rbacGate(reg.Checker, "job.read", reg.Jobs.GetJob))
 	r.Register("POST /api/v1/jobs/{id}/cancel", rbacGate(reg.Checker, "job.cancel", reg.Jobs.CancelJob))
 	r.Register("POST /api/v1/jobs/{id}/approve", rbacGate(reg.Checker, "approval.approve", reg.Jobs.ApproveJob))
@@ -695,7 +712,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/agent-groups/{id}/members", rbacGate(reg.Checker, "agent.read", reg.AgentGroups.ListAgentGroupMembers))
 
 	// Audit routes: /api/v1/audit
-	r.Register("GET /api/v1/audit", rbacGate(reg.Checker, "audit.read", reg.Audit.ListAuditEvents))
+	r.Register("GET /api/v1/audit", etagged(rbacGate(reg.Checker, "audit.read", reg.Audit.ListAuditEvents)))
 	// Audit 2026-05-10 HIGH-11 closure — `audit.export` permission was
 	// already seeded into r-admin + r-auditor (migration 000031), but
 	// no endpoint enforced it pre-fix; r-auditor's claim was misleading
@@ -765,7 +782,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 
 	// Discovery routes: /api/v1/discovered-certificates, /api/v1/discovery-scans
 	r.Register("POST /api/v1/agents/{id}/discoveries", rbacGate(reg.Checker, "discovery.run", reg.Discovery.SubmitDiscoveryReport))
-	r.Register("GET /api/v1/discovered-certificates", rbacGate(reg.Checker, "discovery.read", reg.Discovery.ListDiscovered))
+	r.Register("GET /api/v1/discovered-certificates", etagged(rbacGate(reg.Checker, "discovery.read", reg.Discovery.ListDiscovered)))
 	r.Register("GET /api/v1/discovered-certificates/{id}", rbacGate(reg.Checker, "discovery.read", reg.Discovery.GetDiscovered))
 	r.Register("POST /api/v1/discovered-certificates/{id}/claim", rbacGate(reg.Checker, "discovery.claim", reg.Discovery.ClaimDiscovered))
 	r.Register("POST /api/v1/discovered-certificates/{id}/dismiss", rbacGate(reg.Checker, "discovery.claim", reg.Discovery.DismissDiscovered))

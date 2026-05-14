@@ -112,6 +112,49 @@ const (
 	DefaultJitterPct   = 0.2
 )
 
+// Phase 6 SCALE-M3 closure (2026-05-14): operator-overridable global
+// default for the package-level MaxWait fallback. Priority chain for
+// every Poll() call:
+//
+//  1. cfg.MaxWait > 0  → per-call value (set by the caller, usually
+//     from a per-connector env like CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS)
+//  2. effectiveDefaultMaxWait != nil → process-wide override set via
+//     SetDefaultMaxWait (from CERTCTL_ASYNC_POLL_MAX_WAIT_SECONDS at
+//     server boot)
+//  3. DefaultMaxWait constant (10 minutes)
+//
+// Pre-Phase-6, paths (1) + (3) existed. Path (2) lets an operator tune
+// the global fallback in one place without setting four per-connector
+// envs (digicert, entrust, globalsign, sectigo).
+var effectiveDefaultMaxWait *time.Duration
+
+// SetDefaultMaxWait overrides the package-level DefaultMaxWait
+// fallback for the rest of the process lifetime. Intended to be
+// called exactly once at boot from cmd/server/main.go after reading
+// CERTCTL_ASYNC_POLL_MAX_WAIT_SECONDS. Subsequent calls overwrite the
+// previous override. A zero or negative duration clears the override
+// (restoring the constant default).
+//
+// Per-connector overrides (caller-provided cfg.MaxWait) take
+// precedence over this global default.
+func SetDefaultMaxWait(d time.Duration) {
+	if d <= 0 {
+		effectiveDefaultMaxWait = nil
+		return
+	}
+	effectiveDefaultMaxWait = &d
+}
+
+// currentDefaultMaxWait returns the effective default — the
+// SetDefaultMaxWait override if one is in place, else the package's
+// DefaultMaxWait constant.
+func currentDefaultMaxWait() time.Duration {
+	if effectiveDefaultMaxWait != nil {
+		return *effectiveDefaultMaxWait
+	}
+	return DefaultMaxWait
+}
+
 // Poll runs fn with exponential backoff + jitter until Done, Failed,
 // MaxWait, or ctx cancellation.
 //
@@ -132,7 +175,7 @@ const (
 // error in case MaxWait or ctx-cancel later fires.
 func Poll(ctx context.Context, cfg Config, fn PollFunc) (Result, error) {
 	if cfg.MaxWait <= 0 {
-		cfg.MaxWait = DefaultMaxWait
+		cfg.MaxWait = currentDefaultMaxWait()
 	}
 	if cfg.InitialWait <= 0 {
 		cfg.InitialWait = DefaultInitialWait

@@ -422,6 +422,8 @@ Every `CERTCTL_*` environment variable is read by the server's `internal/config/
 | `CERTCTL_DEMO_MODE_ACK` | `false` | Acknowledges demo-mode synthetic admin posture (required when `CERTCTL_AUTH_TYPE=none` binds to a non-loopback host). Must be paired with `CERTCTL_DEMO_MODE_ACK_TS` per Phase 2 SEC-H3. |
 | `CERTCTL_DEMO_MODE_ACK_TS` | (empty) | Phase 2 SEC-H3: unix-epoch timestamp at which DemoModeAck was last acknowledged. When `CERTCTL_DEMO_MODE_ACK=true`, this must parse as a unix epoch within the last 24h. Set via `CERTCTL_DEMO_MODE_ACK_TS=$(date +%s)` at every `docker compose up`. |
 | `CERTCTL_ACME_INSECURE_ACK` | `false` | Phase 2 SEC-M4: explicit ACK required to boot with `CERTCTL_ACME_INSECURE=true`. Production deploys MUST never set either flag. |
+| `CERTCTL_DATABASE_MAX_CONNS` | `50` | Phase 6 SCALE-M1: max open DB connections in the server's pool. Default was `25` pre-Phase-6. Idle connections = max/5. Operator-tune ladder for larger fleets: ≤500 certs → 50; 5K certs → 100; 50K certs → 200 (also raise Postgres `max_connections`). See `docs/operator/scale.md`. |
+| `CERTCTL_ASYNC_POLL_MAX_WAIT_SECONDS` | (unset → 600) | Phase 6 SCALE-M3: process-wide override for the asyncpoll package's `DefaultMaxWait` (10 minutes). Caps total wall-clock time the certctl-server spends polling an async CA (DigiCert / Entrust / GlobalSign / Sectigo) before returning `StillPending` to the scheduler for re-enqueue. Per-connector overrides (`CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS`, etc.) take precedence when set. |
 
 ### Agent
 

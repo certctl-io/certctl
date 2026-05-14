@@ -1961,8 +1961,15 @@ func Load() (*Config, error) {
 			AuditFlushTimeoutSeconds: getEnvInt("CERTCTL_AUDIT_FLUSH_TIMEOUT_SECONDS", 30),
 		},
 		Database: DatabaseConfig{
-			URL:            getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl"),
-			MaxConnections: getEnvInt("CERTCTL_DATABASE_MAX_CONNS", 25),
+			URL: getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl"),
+			// Phase 6 SCALE-M1 closure (2026-05-14): bumped default from
+			// 25 → 50 to relieve pool-saturation pressure on 1K+ agent /
+			// 10K+ cert fleets. Postgres default max_connections is 100
+			// on the smallest tier; 50 leaves headroom for backups, ad-hoc
+			// psql sessions, and one extra server replica without
+			// exhausting the DB-side cap. Operator-tune ladder for larger
+			// fleets documented in docs/operator/scale.md.
+			MaxConnections: getEnvInt("CERTCTL_DATABASE_MAX_CONNS", 50),
 			MigrationsPath: getEnv("CERTCTL_DATABASE_MIGRATIONS_PATH", "./migrations"),
 			DemoSeed:       getEnvBool("CERTCTL_DEMO_SEED", false),
 		},

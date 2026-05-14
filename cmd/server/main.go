@@ -36,6 +36,7 @@ import (
 	discoveryawssm "github.com/certctl-io/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/certctl-io/certctl/internal/connector/discovery/azurekv"
 	discoverygcpsm "github.com/certctl-io/certctl/internal/connector/discovery/gcpsm"
+	"github.com/certctl-io/certctl/internal/connector/issuer/asyncpoll"
 	notifyemail "github.com/certctl-io/certctl/internal/connector/notifier/email"
 	notifyopsgenie "github.com/certctl-io/certctl/internal/connector/notifier/opsgenie"
 	notifypagerduty "github.com/certctl-io/certctl/internal/connector/notifier/pagerduty"
@@ -149,6 +150,19 @@ func main() {
 		logger.Warn("agent bootstrap token unset (CERTCTL_AGENT_BOOTSTRAP_TOKEN) — agents may self-register without authentication; this default will become deny-by-default in v2.2.0; generate one with: openssl rand -hex 32")
 	} else {
 		logger.Info("agent bootstrap token configured (length redacted; constant-time compare on POST /api/v1/agents)")
+	}
+
+	// Phase 6 SCALE-M3 closure (2026-05-14): operator-overridable
+	// package-level default for the asyncpoll MaxWait fallback.
+	// Per-connector overrides (CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS,
+	// CERTCTL_ENTRUST_POLL_MAX_WAIT_SECONDS, etc.) still win when set;
+	// this global env is the middle of the priority chain (above the
+	// 10-minute package default const, below per-connector overrides).
+	// See internal/connector/issuer/asyncpoll/asyncpoll.go for the
+	// SetDefaultMaxWait contract.
+	if v, _ := strconv.Atoi(os.Getenv("CERTCTL_ASYNC_POLL_MAX_WAIT_SECONDS")); v > 0 {
+		asyncpoll.SetDefaultMaxWait(time.Duration(v) * time.Second)
+		logger.Info("asyncpoll default max-wait override", "seconds", v)
 	}
 
 	// Initialize database connection pool.
