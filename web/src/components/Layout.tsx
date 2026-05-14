@@ -283,7 +283,28 @@ export default function Layout() {
           </button>
         </div>
 
-        <div className="px-5 py-3 border-t border-white/10 flex items-center justify-between">
+        {/* Maintainer attribution row — mirrors the landing-page footer
+            (certctl.io: "Built and maintained by Shankar · certctl.io").
+            Same font-mono / muted-text typography; only "Shankar" carries
+            the LinkedIn link (the same href + rel="me noopener" pattern
+            the landing page uses). Single-maintainer OSS standard
+            (Cal.com, Plausible, Beekeeper Studio do the same). */}
+        <div className="px-5 pt-3 pb-1 border-t border-white/10">
+          <span className="text-2xs text-sidebar-text/70 font-mono">
+            Built and maintained by{' '}
+            <a
+              href="https://www.linkedin.com/in/shankar-k-a1b6853ba"
+              target="_blank"
+              rel="me noopener noreferrer"
+              className="text-sidebar-text/90 hover:text-white transition-colors underline-offset-2 hover:underline"
+              title="Shankar on LinkedIn — opens in a new tab"
+            >
+              Shankar
+            </a>
+          </span>
+        </div>
+
+        <div className="px-5 pt-1 pb-3 flex items-center justify-between">
           <span className="text-2xs text-brand-300/60 font-mono">certctl</span>
           {authRequired && (
             <button
