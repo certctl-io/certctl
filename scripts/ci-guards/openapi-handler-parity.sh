@@ -7,33 +7,56 @@
 #
 # Per ci-pipeline-cleanup bundle Phase 9 / frozen decision 0.11.
 #
-# Phase 5 reconciliation (2026-05-13):
-#   220 r.Register call sites in internal/api/router/router.go
-#   209 unique (METHOD /path) router routes after de-duplication
-#   158 operationIds in api/openapi.yaml
-#    64 documented exceptions in api/openapi-handler-exceptions.yaml
-#     0 unaccounted router routes — every route is in OpenAPI OR
-#       in the exceptions YAML. Guard passes clean today.
+# Phase 13 Sprint 13.1 (2026-05-14) — every entry in the exceptions
+# YAML now carries a required `category: wire-protocol | rest-deferred`
+# field. This script reports the two buckets alongside the total. The
+# rest-deferred bucket is gated by a sibling guard
+# (openapi-rest-deferred-monotonic.sh) against a checked-in baseline
+# at api/openapi-handler-exceptions-baseline.txt.
 #
-# Of the 64 exceptions:
-#   35 wire-protocol carve-outs (SCEP RFC 8894 = 8, ACME RFC 8555
-#      default + per-profile = 27). These MUST stay as exceptions —
-#      they're protocol contracts, not REST resources.
-#   29 REST-shaped routes deferred from openapi.yaml authoring
-#      (auth sessions, OIDC providers admin, breakglass admin,
-#      users mgmt, runtime-config, demo-residual-cleanup, audit
-#      export). Burn-down target: author the 29 OpenAPI ops over
-#      the next ~2 sprints so the generated client (web/orval.config.ts)
-#      covers them. Tracked under ARCH-H1 in
-#      cowork/certctl-architecture-diligence-audit.html.
+# Current state (2026-05-14):
+#   220 r.Register / r.mux.Handle call sites in internal/api/router/router.go
+#   158 operationIds in api/openapi.yaml
+#    64 documented exceptions (36 wire-protocol + 28 rest-deferred)
+#     0 unaccounted router routes — guard passes clean today.
+#
+# Sprints 13.4-13.6 drive rest-deferred to zero by authoring OpenAPI ops
+# for the 28 REST-shaped routes; each batch deletes the corresponding
+# exception entries + bumps the baseline file downward. Sprint 13.7
+# tightens this guard's rest-deferred floor from "monotonic-decrease"
+# (sibling guard) to a hard zero-exact pin (this guard).
 #
 # Going forward: any new gap (in either direction) fails the build
-# unless documented in the exceptions YAML.
+# unless documented in the exceptions YAML with a category.
+#
+# Subcommand:
+#   bash scripts/ci-guards/openapi-handler-parity.sh
+#     Full parity check + bucket reporting.
+#   bash scripts/ci-guards/openapi-handler-parity.sh --bucket=wire-protocol
+#   bash scripts/ci-guards/openapi-handler-parity.sh --bucket=rest-deferred
+#     Print just the count for the named bucket (used by sibling guards
+#     + Sprint 13.7's zero-exact pin). Exit 0 always; informational.
 
 set -e
 
-python3 - <<'PY'
+BUCKET=""
+case "${1:-}" in
+    --bucket=wire-protocol|--bucket=rest-deferred)
+        BUCKET="${1#--bucket=}"
+        ;;
+    "")
+        ;;
+    *)
+        echo "::error::unknown argument: $1"
+        echo "usage: $0 [--bucket=wire-protocol|--bucket=rest-deferred]"
+        exit 2
+        ;;
+esac
+
+python3 - "$BUCKET" <<'PY'
 import re, sys, yaml
+
+bucket_arg = sys.argv[1] if len(sys.argv) > 1 else ""
 
 # Extract router routes: r.mux.Handle("METHOD /path", ...) and
 # r.Register("METHOD /path", ...) — Go 1.22+ ServeMux pattern syntax.
@@ -60,19 +83,53 @@ try:
 except FileNotFoundError:
     exc_doc = {'documented_exceptions': []}
 exception_set = set()
+bucket_counts = {'wire-protocol': 0, 'rest-deferred': 0}
+missing_category = []
+unknown_category = []
 for entry in (exc_doc.get('documented_exceptions') or []):
     route_str = entry['route']
     parts = route_str.split(maxsplit=1)
     if len(parts) == 2:
         exception_set.add((parts[0], parts[1]))
+    cat = entry.get('category')
+    if cat is None:
+        missing_category.append(route_str)
+    elif cat in bucket_counts:
+        bucket_counts[cat] += 1
+    else:
+        unknown_category.append((route_str, cat))
+
+# --bucket=X subcommand: print just the count, exit 0, no other output.
+if bucket_arg in bucket_counts:
+    print(bucket_counts[bucket_arg])
+    sys.exit(0)
 
 # Report counts
 print(f"Router routes:                  {len(router_set)}")
 print(f"OpenAPI operations:             {len(oapi_set)}")
 print(f"Documented exceptions:          {len(exception_set)}")
+print(f"  wire-protocol:                {bucket_counts['wire-protocol']}")
+print(f"  rest-deferred:                {bucket_counts['rest-deferred']}")
 print()
 
 fail = False
+
+# Phase 13 Sprint 13.1: every entry MUST have a category. Missing or
+# unknown categories fail the build — keeps the bucket math honest.
+if missing_category:
+    print(f"::error::api/openapi-handler-exceptions.yaml: {len(missing_category)} entries missing required `category:` field:")
+    for r in missing_category:
+        print(f"  {r}")
+    print()
+    print("Add `category: wire-protocol` (with an RFC anchor in `why:`) or")
+    print("`category: rest-deferred` (OpenAPI op deferred) to each entry.")
+    fail = True
+
+if unknown_category:
+    print(f"::error::api/openapi-handler-exceptions.yaml: {len(unknown_category)} entries with unknown category value (must be wire-protocol or rest-deferred):")
+    for r, c in unknown_category:
+        print(f"  {r}  → category: {c}")
+    fail = True
 
 # Routes in router but NOT in openapi AND NOT in exceptions = drift
 router_only_undocumented = router_set - oapi_set - exception_set
@@ -84,8 +141,9 @@ if router_only_undocumented:
     print("Either:")
     print("  (a) Add the operationId to api/openapi.yaml (preferred for REST endpoints), OR")
     print("  (b) Add the route to api/openapi-handler-exceptions.yaml with a one-line `why:` justification")
-    print("      (only for protocol-shaped or operational routes — health probes,")
-    print("      Prometheus scrape, SCEP/EST/OCSP wire-protocol endpoints, etc.).")
+    print("      AND a `category: wire-protocol | rest-deferred` field (only protocol-shaped")
+    print("      or operational routes — health probes, Prometheus scrape, SCEP/EST/ACME")
+    print("      wire-protocol endpoints, etc. — qualify as wire-protocol).")
     fail = True
 
 # Routes in openapi but NOT in router = orphan operationId

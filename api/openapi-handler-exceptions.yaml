@@ -1,48 +1,95 @@
 # Routes registered in internal/api/router/router.go that are intentionally
-# NOT in api/openapi.yaml. Each entry needs a one-line `why:` justification.
+# NOT in api/openapi.yaml. Each entry needs a one-line `why:` justification
+# AND a required `category:` field (added in Phase 13 Sprint 13.1,
+# 2026-05-14, architecture diligence audit ARCH-H1).
+#
 # Adding a new entry requires PR-time review.
 #
 # OpenAPI-shaped REST endpoints belong in api/openapi.yaml, NOT here.
-# This list is for protocol-shaped (SCEP wire endpoints) and operational
-# (health, metrics, pprof) routes only.
+# This list is for protocol-shaped (SCEP/ACME/EST wire endpoints) and
+# operational (health, metrics, pprof) routes only.
 #
 # Per ci-pipeline-cleanup bundle Phase 9 / frozen decision 0.11.
 #
-# Phase 5 reconciliation (2026-05-13, architecture diligence audit
-# ARCH-H1): of the 64 entries below, 35 are legitimate wire-protocol
-# carve-outs (SCEP RFC 8894 = 8 entries, ACME RFC 8555 default + per-
-# profile = 27 entries) that MUST stay. The remaining 29 are REST-
-# shaped routes whose OpenAPI ops were deferred during their original
-# Bundle 2 / audit-2026-05-10 / 2026-05-11 work. Burn-down plan:
+# ──────────────────────────────────────────────────────────────────────
+# The two-bucket contract (Phase 13 Sprint 13.1)
+# ──────────────────────────────────────────────────────────────────────
 #
-#   Sprint A (per-cluster, ~7-8 ops each):
-#     Cluster 1: auth/sessions + auth/oidc (12 ops)
-#     Cluster 2: auth/breakglass + auth/users + auth/runtime-config (8 ops)
-#     Cluster 3: audit/export + demo-residual/cleanup + auth/logout +
-#                auth/breakglass/login + auth/oidc/{login,callback,bcl} (9 ops)
+#   category: wire-protocol
+#     The route's wire shape is dictated by an IETF RFC (SCEP RFC 8894,
+#     ACME RFC 8555, ACME ARI RFC 9773, EST RFC 7030) or it's a
+#     sibling/shorthand variant of such a route (same wire semantics,
+#     different cosmetic path — e.g. trailing-slash forms, default-
+#     profile shorthands). Documenting these as REST operations in
+#     openapi.yaml would duplicate the RFC with no information gain;
+#     the canonical operator references live in docs/acme-server.md +
+#     docs/operator/scep.md + docs/operator/est.md. These entries
+#     NEVER burn down — they're protocol contracts, not gaps.
+#
+#   category: rest-deferred
+#     The route is REST-shaped (resource CRUD, JSON request/response,
+#     RBAC-gated) but its OpenAPI operation was deferred when the
+#     handler shipped. These MUST monotonically decrease to zero.
+#     Phase 13 Sprints 13.4-13.6 author the OpenAPI ops + delete the
+#     corresponding exception entries; the
+#     openapi-rest-deferred-monotonic.sh CI guard fails any PR that
+#     grows the rest-deferred bucket vs the checked-in baseline at
+#     api/openapi-handler-exceptions-baseline.txt.
+#
+# ──────────────────────────────────────────────────────────────────────
+# Phase 13 Sprint 13.1 categorization (2026-05-14)
+# ──────────────────────────────────────────────────────────────────────
+#
+# Current split, re-derived by the parity script's bucket-reporting
+# subcommand:
+#
+#   total entries:           64
+#   wire-protocol:           36
+#   rest-deferred:           28
+#
+# Burn-down plan for the rest-deferred bucket (Phase 13 Sprints 13.4-13.6):
+#
+#   Sprint 13.4 → 28 - 13 = 15 (auth/sessions + auth/oidc cluster, 13 ops)
+#   Sprint 13.5 → 15 -  8 =  7 (auth/breakglass + auth/users +
+#                               auth/runtime-config, 8 ops)
+#   Sprint 13.6 →  7 -  7 =  0 (audit/export + demo-residual + 3
+#                               OIDC browser flows + auth/logout +
+#                               auth/breakglass/login, 7 ops)
+#
+# Sprint 13.7 then tightens the parity-script's rest-deferred floor
+# from monotonic-decrease to a hard zero-exact pin. After that, any
+# new REST route MUST land with an OpenAPI op or fail CI.
 #
 # Each authored OpenAPI op needs request/response schemas (not
 # placeholders) so the generated client at web/orval.config.ts emits
 # typed signatures. When an op lands, delete the corresponding entry
-# below + bump the openapi-handler-parity.sh expected counts.
+# below + bump api/openapi-handler-exceptions-baseline.txt downward.
 
 documented_exceptions:
   - route: "GET /scep"
     why: "SCEP wire-protocol endpoint per RFC 8894 §3.1; serves CA certs via GetCACert/GetCACaps query params, NOT a REST resource."
+    category: wire-protocol
   - route: "POST /scep"
     why: "SCEP wire-protocol endpoint per RFC 8894 §3.1; receives PKCSReq / RenewalReq PKIMessages, NOT a REST resource."
+    category: wire-protocol
   - route: "GET /scep/"
     why: "SCEP wire-protocol endpoint with trailing-slash variant; ChromeOS clients send the trailing-slash form."
+    category: wire-protocol
   - route: "POST /scep/"
     why: "SCEP wire-protocol endpoint with trailing-slash variant; ChromeOS clients send the trailing-slash form."
+    category: wire-protocol
   - route: "GET /scep-mtls"
     why: "SCEP-mTLS sibling endpoint per ci-pipeline-cleanup-prerequisite EST RFC 7030 hardening Phase 6.5; same wire-protocol semantics, mutually-authenticated TLS variant."
+    category: wire-protocol
   - route: "POST /scep-mtls"
     why: "SCEP-mTLS sibling endpoint, POST variant."
+    category: wire-protocol
   - route: "GET /scep-mtls/"
     why: "SCEP-mTLS sibling endpoint, trailing-slash variant."
+    category: wire-protocol
   - route: "POST /scep-mtls/"
     why: "SCEP-mTLS sibling endpoint, trailing-slash POST variant."
+    category: wire-protocol
 
   # ACME server (RFC 8555 + RFC 9773 ARI) — wire-protocol surface.
   # Like SCEP/EST, ACME is a JWS-signed-JSON wire protocol whose
@@ -54,62 +101,90 @@ documented_exceptions:
   # challenge, cert, key-change, revoke-cert, renewal-info routes land.
   - route: "GET /acme/profile/{id}/directory"
     why: "ACME server RFC 8555 §7.1.1 directory; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "HEAD /acme/profile/{id}/new-nonce"
     why: "ACME server RFC 8555 §7.2 new-nonce; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "GET /acme/profile/{id}/new-nonce"
     why: "ACME server RFC 8555 §7.2 new-nonce GET form; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/new-account"
     why: "ACME server RFC 8555 §7.3 new-account (JWS jwk); documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/account/{acc_id}"
     why: "ACME server RFC 8555 §7.3.2 + §7.3.6 (JWS kid) account update + deactivation; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "GET /acme/directory"
     why: "ACME server default-profile shorthand; mirrors per-profile when CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID is set."
+    category: wire-protocol
   - route: "HEAD /acme/new-nonce"
     why: "ACME server default-profile shorthand for new-nonce HEAD."
+    category: wire-protocol
   - route: "GET /acme/new-nonce"
     why: "ACME server default-profile shorthand for new-nonce GET."
+    category: wire-protocol
   - route: "POST /acme/new-account"
     why: "ACME server default-profile shorthand for new-account."
+    category: wire-protocol
   - route: "POST /acme/account/{acc_id}"
     why: "ACME server default-profile shorthand for account update + deactivation."
+    category: wire-protocol
 
   # Phase 2 — orders + finalize + authz + cert.
   - route: "POST /acme/profile/{id}/new-order"
     why: "ACME server RFC 8555 §7.4 new-order; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/order/{ord_id}"
     why: "ACME server RFC 8555 §7.4 order POST-as-GET; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/order/{ord_id}/finalize"
     why: "ACME server RFC 8555 §7.4 finalize; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/authz/{authz_id}"
     why: "ACME server RFC 8555 §7.5 authz POST-as-GET; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/challenge/{chall_id}"
     why: "ACME server RFC 8555 §7.5.1 challenge response; dispatches to Phase 3 validator pool."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/cert/{cert_id}"
     why: "ACME server RFC 8555 §7.4.2 cert download; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/new-order"
     why: "Phase 2 default-profile shorthand for new-order."
+    category: wire-protocol
   - route: "POST /acme/order/{ord_id}"
     why: "Phase 2 default-profile shorthand for order POST-as-GET."
+    category: wire-protocol
   - route: "POST /acme/order/{ord_id}/finalize"
     why: "Phase 2 default-profile shorthand for finalize."
+    category: wire-protocol
   - route: "POST /acme/authz/{authz_id}"
     why: "Phase 2 default-profile shorthand for authz POST-as-GET."
+    category: wire-protocol
   - route: "POST /acme/challenge/{chall_id}"
     why: "Phase 3 default-profile shorthand for challenge response."
+    category: wire-protocol
   - route: "POST /acme/cert/{cert_id}"
     why: "Phase 2 default-profile shorthand for cert download."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/key-change"
     why: "ACME server RFC 8555 §7.3.5 doubly-signed key rollover; documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/profile/{id}/revoke-cert"
     why: "ACME server RFC 8555 §7.6 revoke-cert (kid OR cert-key auth); documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "GET /acme/profile/{id}/renewal-info/{cert_id}"
     why: "ACME server RFC 9773 ACME Renewal Information (unauthenticated GET); documented in docs/acme-server.md."
+    category: wire-protocol
   - route: "POST /acme/key-change"
     why: "Phase 4 default-profile shorthand for key rollover."
+    category: wire-protocol
   - route: "POST /acme/revoke-cert"
     why: "Phase 4 default-profile shorthand for revoke-cert."
+    category: wire-protocol
   - route: "GET /acme/renewal-info/{cert_id}"
     why: "Phase 4 default-profile shorthand for ARI."
+    category: wire-protocol
 
   # =============================================================================
   # Auth Bundle 2 + audit-2026-05-10/11 fix bundle — REST endpoints not yet
@@ -121,57 +196,85 @@ documented_exceptions:
   # =============================================================================
   - route: "GET /auth/oidc/login"
     why: "Bundle 2 Phase 5 OIDC login redirect; user-facing 302 with state cookie. OpenAPI rep deferred to pre-2.2.0."
+    category: rest-deferred
   - route: "GET /auth/oidc/callback"
     why: "Bundle 2 Phase 5 OIDC callback handler; RFC 9700 §4.7.1 + RFC 9207. OpenAPI rep deferred to pre-2.2.0."
+    category: rest-deferred
   - route: "POST /auth/logout"
     why: "Bundle 2 Phase 5 cookie + CSRF revoker. OpenAPI rep deferred to pre-2.2.0."
+    category: rest-deferred
   - route: "POST /auth/breakglass/login"
     why: "Bundle 2 Phase 7.5 public break-glass login (auth-bypass, 404 when disabled). OpenAPI rep deferred to pre-2.2.0."
+    category: rest-deferred
   - route: "POST /auth/oidc/back-channel-logout"
     why: "Bundle 2 Phase 5 RFC OIDC Back-Channel Logout 1.0 endpoint. OpenAPI rep deferred to pre-2.2.0."
+    category: rest-deferred
   - route: "GET /api/v1/auth/sessions"
     why: "Bundle 2 Phase 5 self/admin session list. OpenAPI rep deferred to pre-2.2.0."
+    category: rest-deferred
   - route: "DELETE /api/v1/auth/sessions/{id}"
     why: "Bundle 2 Phase 5 session revoke. OpenAPI rep deferred to pre-2.2.0."
+    category: rest-deferred
   - route: "DELETE /api/v1/auth/sessions"
     why: "Bundle 2 audit-2026-05-10 MED-2/3 revoke-all-except-current."
+    category: rest-deferred
   - route: "GET /api/v1/auth/oidc/providers"
     why: "Bundle 2 Phase 5 OIDC provider CRUD (list)."
+    category: rest-deferred
   - route: "POST /api/v1/auth/oidc/providers"
     why: "Bundle 2 Phase 5 OIDC provider CRUD (create)."
+    category: rest-deferred
   - route: "PUT /api/v1/auth/oidc/providers/{id}"
     why: "Bundle 2 Phase 5 OIDC provider CRUD (update)."
+    category: rest-deferred
   - route: "DELETE /api/v1/auth/oidc/providers/{id}"
     why: "Bundle 2 Phase 5 OIDC provider CRUD (delete)."
+    category: rest-deferred
   - route: "POST /api/v1/auth/oidc/providers/{id}/refresh"
     why: "Bundle 2 audit-2026-05-10 MED-7 JWKS hot-refresh."
+    category: rest-deferred
   - route: "GET /api/v1/auth/oidc/providers/{id}/jwks-status"
     why: "Bundle 2 audit-2026-05-10 MED-7 JWKS health snapshot."
+    category: rest-deferred
   - route: "POST /api/v1/auth/oidc/test"
     why: "Bundle 2 audit-2026-05-10 MED-5 dry-run discovery + JWKS + alg-downgrade check."
+    category: rest-deferred
   - route: "GET /api/v1/auth/oidc/group-mappings"
     why: "Bundle 2 Phase 5 group-mapping CRUD (list)."
+    category: rest-deferred
   - route: "POST /api/v1/auth/oidc/group-mappings"
     why: "Bundle 2 Phase 5 group-mapping CRUD (create)."
+    category: rest-deferred
   - route: "DELETE /api/v1/auth/oidc/group-mappings/{id}"
     why: "Bundle 2 Phase 5 group-mapping CRUD (delete)."
+    category: rest-deferred
   - route: "GET /api/v1/auth/breakglass/credentials"
     why: "Bundle 2 Phase 7.5 admin break-glass list (404 when disabled; password hash never on wire)."
+    category: rest-deferred
   - route: "POST /api/v1/auth/breakglass/credentials"
     why: "Bundle 2 Phase 7.5 admin break-glass set/rotate password."
+    category: rest-deferred
   - route: "POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock"
     why: "Bundle 2 Phase 7.5 admin break-glass unlock after lockout."
+    category: rest-deferred
   - route: "DELETE /api/v1/auth/breakglass/credentials/{actor_id}"
     why: "Bundle 2 Phase 7.5 admin break-glass credential delete."
+    category: rest-deferred
   - route: "GET /api/v1/auth/users"
     why: "Bundle 2 audit-2026-05-10 MED-11 users page."
+    category: rest-deferred
   - route: "DELETE /api/v1/auth/users/{id}"
     why: "Bundle 2 audit-2026-05-10 MED-11 user deactivate."
+    category: rest-deferred
   - route: "POST /api/v1/auth/users/{id}/reactivate"
     why: "Bundle 2 audit-2026-05-10 MED-11 user reactivate."
+    category: rest-deferred
   - route: "GET /api/v1/auth/runtime-config"
     why: "Bundle 2 audit-2026-05-10 MED-12 effective auth-runtime-config (read-only)."
+    category: rest-deferred
   - route: "POST /api/v1/auth/demo-residual/cleanup"
     why: "Audit 2026-05-11 A-8 demo-mode residual-grants cleanup endpoint."
+    category: rest-deferred
   - route: "GET /api/v1/audit/export"
     why: "Bundle 1 Phase 8 streaming NDJSON audit export."
+    category: rest-deferred

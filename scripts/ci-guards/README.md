@@ -81,6 +81,8 @@ Count: re-derive on demand via `ls scripts/ci-guards/*.sh | wc -l`. The table be
 | `bundle-8-M-009-bare-usemutation` | M-009 + M-029 mutation contract | Bare `useMutation()` outside `useTrackedMutation` wrapper |
 | `H-1-encryption-key-min-length` | H-1 closure follow-up (post-Phase-5 surfacing) | `CERTCTL_CONFIG_ENCRYPTION_KEY` literal in any `deploy/docker-compose*.yml` shorter than the 32-byte floor enforced by `internal/config/config.go::Validate()` |
 | `test-compose-scep-coherence` | post-Phase-5 surfacing of dead SCEP test config | `CERTCTL_SCEP_ENABLED=true` in test compose without (a) a CI job that runs the SCEP integration test, (b) the `ra.crt` + `ra.key` + `intune_trust_anchor.pem` fixtures committed to `deploy/test/fixtures/`, AND (c) the matching volume mount |
+| `openapi-handler-parity` | ARCH-H1 OpenAPI ↔ handler drift | Router routes vs OpenAPI operations vs documented exceptions (wire-protocol vs rest-deferred buckets). Supports `--bucket=wire-protocol\|rest-deferred` subcommand for sibling guards. |
+| `openapi-rest-deferred-monotonic` | ARCH-H1 Phase 13 Sprint 13.1 — rest-deferred bucket monotonic-decrease | `category: rest-deferred` count growing vs the checked-in baseline at `api/openapi-handler-exceptions-baseline.txt`. Sprints 13.4-13.6 drive this to zero; Sprint 13.7 tightens to a zero-exact pin. |
 
 ### Forward-looking guards (Auditable Codebase Bundle, post-v2.1.0 anti-rot)
 
@@ -103,4 +105,35 @@ for g in scripts/ci-guards/*.sh; do
   echo "=== $(basename "$g") ==="
   bash "$g" || echo "  FAILED"
 done
+```
+
+## ARCH-H1 OpenAPI exception two-bucket contract (Phase 13 Sprint 13.1)
+
+`api/openapi-handler-exceptions.yaml` lists every router route that is intentionally NOT in `api/openapi.yaml`. Each entry carries a required `category:` field with one of two values:
+
+- **`category: wire-protocol`** — the route's wire shape is dictated by an IETF RFC (SCEP RFC 8894, ACME RFC 8555, ACME ARI RFC 9773, EST RFC 7030) or it's a sibling/shorthand variant of one. The canonical reference for these endpoints lives in `docs/acme-server.md` + `docs/operator/scep.md` + `docs/operator/est.md` — duplicating their wire contract in `openapi.yaml` would add no information. **Wire-protocol entries never burn down.**
+
+- **`category: rest-deferred`** — the route is REST-shaped (resource CRUD, JSON request/response, RBAC-gated) but its OpenAPI operation was deferred when the handler shipped. **Rest-deferred entries must monotonically decrease to zero.** Authoring an OpenAPI op for a deferred route + deleting the corresponding exception entry + decrementing `api/openapi-handler-exceptions-baseline.txt` in the same PR is the canonical close path.
+
+### Adding a new exception entry
+
+The default category for new entries is `rest-deferred`. Only set `wire-protocol` when:
+
+1. The `why:` field cites a specific RFC anchor (e.g. "RFC 8555 §7.1.1 directory"), AND
+2. The route's wire shape is dictated by the RFC (not a REST resource that happens to live alongside one).
+
+When in doubt, default to `rest-deferred` and author the OpenAPI op. The two guards in this directory enforce both buckets:
+
+- `openapi-handler-parity.sh` reports bucket counts + fails on missing/unknown `category:` fields + fails on stale exceptions / undocumented router routes.
+- `openapi-rest-deferred-monotonic.sh` fails if `rest-deferred` grows vs the baseline file at `api/openapi-handler-exceptions-baseline.txt`.
+
+### Inspecting bucket counts
+
+```bash
+# Full report.
+bash scripts/ci-guards/openapi-handler-parity.sh
+
+# Just one bucket count (used by sibling guards).
+bash scripts/ci-guards/openapi-handler-parity.sh --bucket=wire-protocol
+bash scripts/ci-guards/openapi-handler-parity.sh --bucket=rest-deferred
 ```
