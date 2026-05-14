@@ -92,10 +92,12 @@ Security: three authentication paths — API keys (SHA-256 hashed + constant-tim
 ```bash
 git clone https://github.com/certctl-io/certctl.git
 cd certctl
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up -d --build
+./deploy/demo-up.sh -d --build
 ```
 
-Wait ~30 seconds, then open **https://localhost:8443** in your browser. The demo overlay flips the base into demo-mode auth (every request served as the synthetic admin actor `actor-demo-anon` — the server emits a prominent ⚠ DEMO MODE banner at boot reminding you this posture is for evaluation only) and seeds 180 days of realistic history across 13 issuers, 8 agents, managed + discovered certs, jobs, deploys, audit, and notification events. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
+Wait ~30 seconds, then open **https://localhost:8443** in your browser. The `demo-up.sh` wrapper exports a fresh `CERTCTL_DEMO_MODE_ACK_TS=$(date +%s)` and forwards the remaining args to `docker compose -f docker-compose.yml -f docker-compose.demo.yml up`. The timestamp export is required by the Phase 2 SEC-H3 fail-closed guard in `internal/config/config.go::Validate` — demo deploys must re-ACK every 24h so a forgotten demo container never silently ends up serving production traffic with `auth-type=none`. The bare `docker compose ... up` command without the timestamp refuses to boot; the wrapper script is the supported entry point.
+
+The demo overlay flips the base into demo-mode auth (every request served as the synthetic admin actor `actor-demo-anon` — the server emits a prominent ⚠ DEMO MODE banner at boot reminding you this posture is for evaluation only) and seeds 180 days of realistic history across 13 issuers, 8 agents, managed + discovered certs, jobs, deploys, audit, and notification events. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
 
 **Production path — `.env` required, fail-closed on placeholders:**
 
