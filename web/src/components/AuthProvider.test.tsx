@@ -132,3 +132,130 @@ describe('AuthProvider — LOW-1 demo-mode banner', () => {
     await waitFor(() => screen.getByTestId('demo-mode-banner'));
   });
 });
+
+// =============================================================================
+// Hotfix #19 (GitHub #13) — AuthProvider 401 unconditional-redirect.
+//
+// The pre-Hotfix-19 401 handler only redirected to /login when `cause`
+// was a recognised OIDC session-expiry category. A bare 401 (no
+// WWW-Authenticate header → cause === '') fell through to an in-place
+// AuthGate state flip that unmounted BrowserRouter under an in-flight
+// <Link>, triggering a react-router-dom invariant that surfaced via
+// ErrorBoundary as "Something went wrong" (GitHub #13).
+//
+// These tests pin: every 401 (regardless of cause) hard-navigates to
+// /login when the caller is not already on /login. Cause-aware
+// session_expired= query param is preserved when cause is non-empty.
+// =============================================================================
+
+describe('AuthProvider — Hotfix #19 401 always-redirects', () => {
+  let originalLocation: Location;
+  let hrefAssignments: string[];
+
+  beforeEach(() => {
+    // /auth/info is unrelated to the 401 path but must not hang the
+    // mount. Resolve it as the demo case (the cheapest non-pending
+    // shape) — the redirect handler doesn't care about authType.
+    vi.mocked(client.getAuthInfo).mockResolvedValue({
+      auth_type: 'none',
+      required: false,
+    });
+
+    // jsdom forbids writing to window.location.href directly without
+    // a settable property descriptor. Replace window.location with a
+    // mock that captures assignments while letting tests pre-set
+    // pathname. Restored in afterEach.
+    originalLocation = window.location;
+    hrefAssignments = [];
+  });
+
+  function installLocationMock(pathname: string): void {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: {
+        pathname,
+        get href() { return ''; },
+        set href(v: string) { hrefAssignments.push(v); },
+      },
+    });
+  }
+
+  function restoreLocation(): void {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: originalLocation,
+    });
+  }
+
+  it('redirects to /login with no query param when cause is empty (bare 401)', async () => {
+    installLocationMock('/targets');
+    try {
+      render(<AuthProvider><div data-testid="child">child</div></AuthProvider>);
+      await waitFor(() => screen.getByTestId('child'));
+
+      window.dispatchEvent(
+        new CustomEvent('certctl:auth-required', { detail: { cause: '' } }),
+      );
+
+      expect(hrefAssignments).toEqual(['/login']);
+    } finally {
+      restoreLocation();
+    }
+  });
+
+  it('redirects to /login?session_expired=invalid_token when cause is invalid_token (new behavior)', async () => {
+    // Pre-Hotfix-19 this cause fell through the conditional with no
+    // redirect. Post-Hotfix-19 every 401 redirects; cause is preserved
+    // in the query param for any LoginPage banner that wants it.
+    installLocationMock('/targets');
+    try {
+      render(<AuthProvider><div data-testid="child">child</div></AuthProvider>);
+      await waitFor(() => screen.getByTestId('child'));
+
+      window.dispatchEvent(
+        new CustomEvent('certctl:auth-required', { detail: { cause: 'invalid_token' } }),
+      );
+
+      expect(hrefAssignments).toEqual(['/login?session_expired=invalid_token']);
+    } finally {
+      restoreLocation();
+    }
+  });
+
+  it('redirects to /login?session_expired=idle_timeout when cause is idle_timeout (existing OIDC UX preserved)', async () => {
+    installLocationMock('/targets');
+    try {
+      render(<AuthProvider><div data-testid="child">child</div></AuthProvider>);
+      await waitFor(() => screen.getByTestId('child'));
+
+      window.dispatchEvent(
+        new CustomEvent('certctl:auth-required', { detail: { cause: 'idle_timeout' } }),
+      );
+
+      expect(hrefAssignments).toEqual(['/login?session_expired=idle_timeout']);
+    } finally {
+      restoreLocation();
+    }
+  });
+
+  it('does not redirect when caller is already on /login (no-op guard preserved)', async () => {
+    installLocationMock('/login');
+    try {
+      render(<AuthProvider><div data-testid="child">child</div></AuthProvider>);
+      await waitFor(() => screen.getByTestId('child'));
+
+      window.dispatchEvent(
+        new CustomEvent('certctl:auth-required', { detail: { cause: '' } }),
+      );
+      window.dispatchEvent(
+        new CustomEvent('certctl:auth-required', { detail: { cause: 'idle_timeout' } }),
+      );
+
+      expect(hrefAssignments).toEqual([]);
+    } finally {
+      restoreLocation();
+    }
+  });
+});

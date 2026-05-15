@@ -46,6 +46,29 @@
   manually. Production deploys: this guard is irrelevant
   (`CERTCTL_DEMO_MODE_ACK` should not be set in production).
 
+### Fixed
+
+- **GitHub #13 / Hotfix #19 — GUI "Something went wrong" after browser
+  refresh on a real (non-demo) install.** Refresh-after-login wipes the
+  in-memory `apiKey` (deliberate — the GUI never persists it to
+  localStorage as a security posture). The next API call returns a
+  bare 401 with no `WWW-Authenticate` header. Pre-Hotfix-19 the
+  AuthProvider 401 handler only hard-navigated to `/login` when `cause`
+  was a recognised OIDC session-expiry category (`idle_timeout` /
+  `absolute_timeout` / `back_channel_revoked`); bare 401s
+  (`cause === ''`) and `invalid_token` causes fell through to an
+  in-place `AuthGate` state flip that unmounted `BrowserRouter` under
+  an in-flight `<Link>`, triggering a `react-router-dom` invariant
+  that surfaced via `ErrorBoundary` as the "Something went wrong"
+  screen. **Fix:** every 401 now hard-navigates to `/login` regardless
+  of cause; the cause-aware UX is preserved by forwarding
+  `?session_expired=<cause>` only when cause is non-empty (bare 401s
+  redirect to plain `/login`). Three-line change in
+  `web/src/components/AuthProvider.tsx`; 4 regression tests added to
+  `AuthProvider.test.tsx` (empty cause from `/targets`, `invalid_token`
+  cause, `idle_timeout` cause, already-on-`/login` no-op guard).
+  Closes #13.
+
 ### Security
 
 - **Alg-downgrade defense relaxed for Keycloak-shape IdPs (v2.1.0 pre-tag fix).**

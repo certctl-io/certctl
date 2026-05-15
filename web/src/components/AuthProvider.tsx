@@ -90,10 +90,26 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       // (not React Router's navigate) because this listener fires
       // outside any route component's render and we want a hard
       // navigation that clears any stale state.
-      if (cause && cause !== 'invalid_token' &&
-          window.location.pathname !== '/login') {
-        const params = new URLSearchParams({ session_expired: cause });
-        window.location.href = '/login?' + params.toString();
+      //
+      // Hotfix #19 (GitHub #13): always hard-navigate to /login on a
+      // 401, regardless of cause. Pre-Hotfix-19 the conditional only
+      // redirected when cause was a non-'invalid_token' OIDC
+      // session-expiry category (idle_timeout / absolute_timeout /
+      // back_channel_revoked). Bare 401s (refresh-after-login wipes
+      // the in-memory apiKey → no Authorization header → server
+      // returns 401 with no WWW-Authenticate header → cause === '')
+      // fell through to an in-place AuthGate state flip that
+      // unmounted BrowserRouter under an in-flight <Link>, triggering
+      // a react-router-dom invariant that surfaced via ErrorBoundary
+      // as "Something went wrong." The unconditional hard-navigation
+      // forecloses the in-place tear-down path; cause-aware UX is
+      // preserved by forwarding ?session_expired= only when cause is
+      // non-empty.
+      if (window.location.pathname !== '/login') {
+        const url = cause
+          ? '/login?' + new URLSearchParams({ session_expired: cause }).toString()
+          : '/login';
+        window.location.href = url;
       }
     };
     window.addEventListener('certctl:auth-required', handler);
