@@ -4,7 +4,7 @@
 <!-- Re-run after adding or removing any t.Skip(). CI guard:    -->
 <!-- scripts/ci-guards/skip-inventory-drift.sh                  -->
 
-> Last reviewed: 2026-05-14
+> Last reviewed: 2026-05-16
 
 ## Summary
 
@@ -103,7 +103,7 @@ Re-run inventory with: `./scripts/skip-inventory.sh`.
 
 ### `internal/auth/oidc/domain`
 
-- `internal/auth/oidc/domain/types_test.go:186` — t.Skip()
+- `internal/auth/oidc/domain/types_test.go:221` — t.Skip()
 
 ### `internal/auth/oidc`
 
