@@ -1,6 +1,6 @@
 # Runbook: PostgreSQL backup for certctl
 
-> Last reviewed: 2026-05-13
+> Last reviewed: 2026-05-16
 
 Use this when:
 - You're setting up a new certctl deployment and need a backup policy
@@ -109,38 +109,76 @@ is the authoritative reference.
 
 ## Automation paths
 
-This is the gap an acquisition reviewer typically wants to see filled.
-certctl ships no backup CronJob template in the Helm chart — the
-operator owns this layer because:
+certctl ships an **opt-in Helm CronJob** for the in-cluster-Postgres
+case (the most common bundled-deploy shape). The template lives at
+`deploy/helm/certctl/templates/backup-cronjob.yaml` and is gated by
+`backup.enabled` in `values.yaml`. Default OFF; flip it on with one
+toggle and a sink choice. For managed Postgres (AWS RDS / GCP Cloud
+SQL / Azure DB) the operator relies on the provider's PITR layer;
+this CronJob is intentionally scoped to the in-cluster-Postgres path.
 
-1. The right tool depends on the deployment topology (in-cluster
-   Postgres vs. managed Postgres vs. self-hosted on a VM).
-2. The right secret-management integration depends on the operator's
-   existing stack (Vault, AWS Secrets Manager, GCP Secret Manager,
-   sealed-secrets, External Secrets).
-3. The right storage backend depends on the operator's existing
-   off-host blob storage.
+### Enabling the bundled CronJob
 
-A bundled CronJob would be a half-answer for any operator with an
-established backup posture, and would have to be torn out before
-production. Three sample recipes that cover the common cases:
+```bash
+# PVC sink (in-cluster persistent volume — simplest)
+helm upgrade --install certctl charts/certctl \
+  --set backup.enabled=true \
+  --set backup.sink=pvc \
+  --set backup.pvc.storageClassName=<your-storage-class> \
+  --set backup.pvc.size=20Gi \
+  --set backup.schedule="0 2 * * *"
 
-- **In-cluster Postgres → S3:** a CronJob running an alpine image with
-  `aws-cli` + the `pg_dump` command above, output piped to
-  `aws s3 cp`. Cosign-signed if your supply-chain policy requires it.
-- **Managed Postgres (AWS RDS / GCP Cloud SQL / Azure DB):** rely on
-  the cloud provider's built-in PITR backup; configure retention
-  ≥ 30 days; the certctl deployment surface is the connection string
-  alone.
-- **Self-hosted VM:** systemd timer + `pg_dump` + `restic` (or
-  `borgbackup`) to encrypted off-host storage.
+# S3 sink (off-cluster, recommended for any deploy past the lab)
+kubectl create secret generic certctl-backup-aws \
+  --from-literal=AWS_ACCESS_KEY_ID=AKIA... \
+  --from-literal=AWS_SECRET_ACCESS_KEY=... \
+  --namespace certctl
+helm upgrade --install certctl charts/certctl \
+  --set backup.enabled=true \
+  --set backup.sink=s3 \
+  --set backup.s3.bucket=my-certctl-backups \
+  --set backup.s3.region=us-east-1 \
+  --set backup.s3.credentialsSecret=certctl-backup-aws \
+  --set backup.schedule="0 2 * * *"
+```
 
-Tracked in [WORKSPACE-ROADMAP.md](../../../WORKSPACE-ROADMAP.md) as a
-post-v2.1.0 nice-to-have: an opt-in Helm CronJob template for the
-in-cluster-Postgres-to-S3 case as a starter. The right time to ship
-it is when a real operator asks for it; speculatively shipping it
-without that signal would just produce a template every deployment
-ends up rewriting.
+The CronJob runs `pg_dump --format=custom --no-owner --no-acl
+--dbname=certctl` (the same shape as the manual command earlier in
+this runbook, so a manual dump and a Job dump are byte-comparable)
+and ships the artifact to the configured sink. Off-host retention
+is the sink's responsibility — S3 lifecycle rules or PVC snapshot
+retention on the storage class, not the CronJob.
+
+### When the bundled CronJob is NOT the answer
+
+- **Managed Postgres (AWS RDS / GCP Cloud SQL / Azure DB).** Use the
+  provider's built-in PITR; configure retention ≥ 30 days. The
+  certctl deployment surface is the connection string alone — no
+  CronJob to run.
+- **Self-hosted Postgres on a VM (no Kubernetes).** Use a systemd
+  timer + `pg_dump` + `restic` (or `borgbackup`) to encrypted
+  off-host storage. The bundled CronJob has no equivalent on bare
+  VMs.
+- **Already running pgbackrest / wal-g.** Keep using it. The bundled
+  CronJob is for the operator who doesn't yet have a backup posture,
+  not a replacement for production-grade WAL-shipping.
+
+### Recovery objectives
+
+The bundled CronJob targets the same RPO/RTO that any nightly-dump
+strategy gives you:
+
+- **RPO ≈ 24h** at the default `0 2 * * *` schedule (you lose at
+  most one day of writes if Postgres burns down). Tighten by running
+  every 6h or 1h; tighten further by switching to WAL-shipping
+  (out of scope for the bundled CronJob).
+- **RTO ≈ 30–60min** for the restore drill below — drop the dump
+  into a fresh Postgres instance, point certctl at it, confirm
+  routes return 200. Empirically measured during the
+  [disaster-recovery runbook](disaster-recovery.md) drill.
+
+If your contractual RPO is below 24h, run pgbackrest WAL-shipping
+alongside (or instead of) the CronJob.
 
 ## Verification — what to dry-run quarterly
 
