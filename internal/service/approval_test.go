@@ -485,3 +485,181 @@ func TestApproval_ProfileEdit_ApplyCallbackInvokedOnApprove(t *testing.T) {
 		t.Errorf("captured.ProfileID = %q, want prof-prod", captured.ProfileID)
 	}
 }
+
+// =============================================================================
+// Acquisition-audit COMP-006 closure (Sprint 7 ACQ, 2026-05-16).
+// =============================================================================
+//
+// The audit flagged COMP-006 as UNKNOWN because it couldn't independently
+// verify that the approval workflow was bullet-tight: i.e., that a denied
+// approval definitely results in NO certificate being signed, and an
+// approved approval definitely lets the issuance proceed. The two tests
+// below pin the load-bearing state-transition invariants AND document the
+// enforcement chain end-to-end so a future auditor can re-derive the
+// proof without rebuilding the trail.
+//
+// Enforcement chain (operator-visible invariant: no cert if denied)
+// -----------------------------------------------------------------
+// Layer 1 — Issuance gate
+//   internal/service/certificate.go::CertificateService.Create (around
+//   L341-373) reads CertificateProfile.RequiresApproval. When true, the
+//   created Job is stamped JobStatusAwaitingApproval (not Pending), AND
+//   a parallel ApprovalRequest row is created. The job processor never
+//   touches AwaitingApproval rows.
+//
+// Layer 2 — Approval state machine
+//   internal/service/approval.go::ApprovalService.Reject and Approve
+//   flip the approval row + the job row atomically:
+//     Reject  → approval=Rejected, job=Cancelled   (pinned by
+//               TestApproval_Reject_TransitionsJobFromAwaitingApprovalToCancelled
+//               above)
+//     Approve → approval=Approved, job=Pending     (pinned by
+//               TestApproval_Approve_TransitionsJobFromAwaitingApprovalToPending
+//               above)
+//   The "already terminal" guard
+//   (TestApproval_Approve_RejectsAlreadyDecided + the Reject-side
+//   analogue) prevents a rejected approval from later being flipped
+//   to approved.
+//
+// Layer 3 — Job claim filter (the LOAD-BEARING SQL invariant)
+//   internal/repository/postgres/job.go::JobRepository.ClaimPendingJobs
+//   (around L296-310) issues
+//     SELECT ... FROM jobs WHERE status = $1
+//   with $1 = domain.JobStatusPending. Cancelled jobs are therefore
+//   NEVER returned to ProcessPendingJobs, so the certificate-issuance
+//   call path (the only path that signs certs) is unreachable for a
+//   denied approval. This SQL filter is the load-bearing "no cert if
+//   denied" enforcement — Layer 2 transitions the job to Cancelled,
+//   Layer 3 ensures Cancelled jobs are inert.
+//
+// What this test DOES
+//   This is a service-layer unit test on the same fake repos as the
+//   rest of approval_test.go. It pins the Layer-2 transition that
+//   feeds Layer-3's filter (Reject → Cancelled, Approve → Pending),
+//   plus the already-terminal guard, in a single named test so a
+//   future contributor reading the test name immediately sees the
+//   COMP-006 attestation.
+//
+// What this test does NOT do
+//   It does NOT spin up Postgres + the job processor + the
+//   certificate signer to drive the full happy-path. That would
+//   duplicate the per-layer unit-test coverage already in place
+//   AND introduce a testcontainers dependency for a closure that's
+//   already provable by composition. The integration suite
+//   (deploy/test/integration_test.go) already exercises the live
+//   issuance path; this test pins the approval-side invariant in
+//   isolation so a future refactor of approval.go can't silently
+//   widen the guard without tripping a named test.
+
+// TestApproval_COMP006_DenyChainPinsNoCertIfRejected attests that an
+// approval-required issuance, once rejected, lands its job in
+// Cancelled and stays terminal (no subsequent approve can re-enable
+// it). Combined with the Layer-3 SQL filter documented above, this is
+// the operator-visible guarantee that a denied approval produces zero
+// certificates.
+func TestApproval_COMP006_DenyChainPinsNoCertIfRejected(t *testing.T) {
+	svc, ar, jr := newApprovalSvcForTest(false)
+
+	// Layer 1 simulation: the upstream certificate.Create path
+	// stamps the job at AwaitingApproval when the profile has
+	// RequiresApproval=true. We seed that state directly because
+	// the upstream is exercised separately by the certificate
+	// service tests.
+	jr.seed("job-comp006-deny", domain.JobStatusAwaitingApproval)
+
+	// Layer 2 — issuance creates the parallel approval row.
+	approvalID, err := svc.RequestApproval(
+		context.Background(),
+		sampleCert(),
+		"job-comp006-deny",
+		"prof-prod",
+		"user-alice",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	// Pre-decision state: job MUST be in AwaitingApproval (Layer-1
+	// + Layer-2 invariant). If this flipped silently to Pending,
+	// Layer 3's SQL filter would pick it up — that would be the
+	// COMP-006 worst case.
+	if got := jr.status("job-comp006-deny"); got != domain.JobStatusAwaitingApproval {
+		t.Fatalf("pre-Reject job status = %q; want AwaitingApproval (cert would issue without approval)", got)
+	}
+
+	// Layer 2 transition: Reject by a different actor (two-person
+	// integrity already enforced by
+	// TestApproval_Approve_RejectsSameActor).
+	if err := svc.Reject(context.Background(), approvalID, "user-bob", "denied — domain not on policy allowlist"); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+
+	// Post-decision: approval=Rejected, job=Cancelled.
+	got, _ := ar.Get(context.Background(), approvalID)
+	if got.State != domain.ApprovalStateRejected {
+		t.Fatalf("approval state after Reject = %q; want Rejected", got.State)
+	}
+	if jstat := jr.status("job-comp006-deny"); jstat != domain.JobStatusCancelled {
+		t.Fatalf("job status after Reject = %q; want Cancelled (Layer-3 SQL filter requires this)", jstat)
+	}
+
+	// Already-terminal guard: a subsequent Approve MUST fail. The
+	// "rejected → approved" loophole would be the only way to
+	// re-enable issuance on a denied approval; the existing
+	// repository ErrAlreadyExists return from UpdateState (mocked
+	// in fakeApprovalRepo.UpdateState) wraps this into the
+	// "already decided" path that approval.go::Approve maps to a
+	// 409 at the handler layer.
+	if err := svc.Approve(context.Background(), approvalID, "user-bob", "re-approve attempt"); err == nil {
+		t.Fatal("Approve on already-rejected approval succeeded; want already-decided rejection (LOOPHOLE — would let a denied cert issue)")
+	}
+	if jstat := jr.status("job-comp006-deny"); jstat != domain.JobStatusCancelled {
+		t.Errorf("job status drifted after failed re-Approve = %q; want still Cancelled", jstat)
+	}
+}
+
+// TestApproval_COMP006_ApproveChainPinsJobReachesPending attests the
+// sibling happy-path: an approved approval transitions the job to
+// Pending, which is the ONLY status ClaimPendingJobs accepts (Layer 3
+// SQL filter). From Pending, the existing certificate-service +
+// renewal-service tests (and the integration suite) prove the cert
+// gets signed. This test pins the Layer-2-to-Layer-3 handoff in
+// isolation so a future refactor that, e.g., transitioned the job
+// to AwaitingCSR instead of Pending would trip here BEFORE shipping.
+func TestApproval_COMP006_ApproveChainPinsJobReachesPending(t *testing.T) {
+	svc, ar, jr := newApprovalSvcForTest(false)
+
+	jr.seed("job-comp006-approve", domain.JobStatusAwaitingApproval)
+
+	approvalID, err := svc.RequestApproval(
+		context.Background(),
+		sampleCert(),
+		"job-comp006-approve",
+		"prof-prod",
+		"user-alice",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("RequestApproval: %v", err)
+	}
+
+	// Layer 2 transition: Approve by a different actor.
+	if err := svc.Approve(context.Background(), approvalID, "user-bob", "approved per change ticket SECOPS-456"); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	got, _ := ar.Get(context.Background(), approvalID)
+	if got.State != domain.ApprovalStateApproved {
+		t.Fatalf("approval state after Approve = %q; want Approved", got.State)
+	}
+
+	// THE LOAD-BEARING ASSERTION for COMP-006's positive path: the
+	// job MUST be in Pending after Approve. ClaimPendingJobs in the
+	// postgres repo filters on exactly this status. A future change
+	// that transitioned to a different status would silently break
+	// every approval-required issuance.
+	if jstat := jr.status("job-comp006-approve"); jstat != domain.JobStatusPending {
+		t.Fatalf("job status after Approve = %q; want Pending (ClaimPendingJobs filters on exactly this status)", jstat)
+	}
+}

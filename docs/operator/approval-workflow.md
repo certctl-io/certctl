@@ -55,6 +55,29 @@ This is the load-bearing two-person-integrity contract. Pinned by:
 - `internal/service/approval_test.go::TestApproval_Approve_RejectsSameActor` — service-level pin.
 - `internal/api/handler/approval_test.go::TestApproval_HandlerApproveAsSameActor_Returns403` — handler-level pin (HTTP 403 + body contains "two-person integrity").
 
+## Enforcement invariants (COMP-006 closure)
+
+Acquisition-audit COMP-006 closure (Sprint 7 ACQ, 2026-05-16). The audit flagged COMP-006 as UNKNOWN because it couldn't independently verify that the approval workflow was bullet-tight — i.e., that a denied approval definitely results in NO certificate being signed, and an approved approval definitely lets the issuance proceed. This subsection documents the enforcement chain end-to-end and names the tests that pin each layer.
+
+**Layer 1 — Issuance gate.** `internal/service/certificate.go::CertificateService.Create` (around L341-373) reads `CertificateProfile.RequiresApproval`. When true, the created Job is stamped `JobStatusAwaitingApproval` (not `Pending`), AND a parallel `ApprovalRequest` row is created. The job processor never touches `AwaitingApproval` rows.
+
+**Layer 2 — Approval state machine.** `internal/service/approval.go::ApprovalService.Reject` and `Approve` flip the approval row + the job row atomically:
+
+- `Reject` → approval=`Rejected`, job=`Cancelled` (pinned by `internal/service/approval_test.go::TestApproval_Reject_TransitionsJobFromAwaitingApprovalToCancelled`).
+- `Approve` → approval=`Approved`, job=`Pending` (pinned by `TestApproval_Approve_TransitionsJobFromAwaitingApprovalToPending`).
+
+The "already terminal" guard (`TestApproval_Approve_RejectsAlreadyDecided`) prevents a rejected approval from later being flipped to approved.
+
+**Layer 3 — Job claim filter (the LOAD-BEARING SQL invariant).** `internal/repository/postgres/job.go::JobRepository.ClaimPendingJobs` (around L296-310) issues:
+
+```sql
+SELECT ... FROM jobs WHERE status = $1
+```
+
+with `$1 = JobStatusPending`. Cancelled jobs are therefore **never** returned to `ProcessPendingJobs`, so the certificate-issuance call path (the only path that signs certs) is unreachable for a denied approval. This SQL filter is the load-bearing "no cert if denied" enforcement — Layer 2 transitions the job to `Cancelled`, Layer 3 ensures `Cancelled` jobs are inert.
+
+**Composition pin.** `internal/service/approval_test.go::TestApproval_COMP006_DenyChainPinsNoCertIfRejected` and `TestApproval_COMP006_ApproveChainPinsJobReachesPending` re-attest the Layer-2-to-Layer-3 handoff in a single named test pair for future auditors. A refactor that, e.g., silently transitioned a denied approval's job to `Pending` instead of `Cancelled` would trip these tests before shipping.
+
 ## Operator playbook: "I need to approve a renewal"
 
 ```bash
