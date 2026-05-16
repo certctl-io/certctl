@@ -680,14 +680,28 @@ monitoring:
     #     name: certctl-prometheus-key
     #     key: api-key
     # bearerTokenSecret: {}
-    # TLS config for the scrape endpoint. The certctl server presents
-    # the same TLS cert the rest of the chart uses; insecureSkipVerify
-    # defaults to true so demos work out of the box. Production deploys
-    # should pin the CA via caFile or ca.secret.
+    # TLS config for the scrape endpoint. Acquisition-audit DEPL-004
+    # closure (Sprint 6 ACQ, 2026-05-16): the default flipped from
+    # `insecureSkipVerify: true` to fail-closed. Operators MUST supply
+    # tlsConfig — either a real verify (caFile / ca / serverName) for
+    # production, or explicit `{ insecureSkipVerify: true }` to opt
+    # back into the pre-2026-05-16 default. The ServiceMonitor template
+    # `{{ required ... }}` guard surfaces missing tlsConfig at chart-
+    # render time before it lands in-cluster.
+    #
+    # In-cluster Prometheus that already trusts the certctl CA via
+    # the chart's existingSecret / cert-manager-emitted bundle: point
+    # caFile at that path (typically /etc/prometheus/secrets/<name>/ca.crt
+    # once you mount the Secret into the Prometheus pod).
+    #
+    # Production-shaped example (verify against the chart's CA):
     # tlsConfig:
     #   caFile: /etc/prometheus/secrets/certctl-ca/ca.crt
     #   serverName: certctl-server
-    # tlsConfig: {}
+    #
+    # Demo / dev-cluster escape hatch (operator-acknowledged):
+    # tlsConfig:
+    #   insecureSkipVerify: true
     # Optional relabeling for the scrape job.
     # relabelings: []
 

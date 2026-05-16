@@ -42,15 +42,25 @@ spec:
       interval: {{ .Values.monitoring.serviceMonitor.interval | default "30s" }}
       scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout | default "10s" }}
       tlsConfig:
-        # The certctl server uses self-signed bootstrap TLS or operator-
-        # provided cert-manager TLS — the ServiceMonitor consumes the
-        # same CA bundle the server presents. When server.tls.existingSecret
-        # is set, operators usually want to pull the matching ca.crt key
-        # out of that Secret. Adjust if your CA chain lives elsewhere.
+        # Acquisition-audit DEPL-004 closure (Sprint 6 ACQ, 2026-05-16).
+        # The default flipped from `insecureSkipVerify: true` to a
+        # fail-closed posture: operators MUST either supply a
+        # `monitoring.serviceMonitor.tlsConfig` block (caFile / ca /
+        # serverName for a real TLS verify) or opt back in explicitly
+        # with `tlsConfig: { insecureSkipVerify: true }`. The {{ required }}
+        # check below renders an error at `helm template` / `helm upgrade`
+        # time if neither is supplied, surfacing the misconfiguration
+        # before the ServiceMonitor lands in-cluster.
+        #
+        # In-cluster scrapes from a Prometheus pod that already trusts the
+        # certctl CA (via existingSecret + cert-manager) keep working with
+        # zero operator action — they just point at the right caFile.
+        # Out-of-cluster Prometheus deployments now require the operator
+        # to surface the trust decision explicitly.
         {{- if .Values.monitoring.serviceMonitor.tlsConfig }}
         {{- toYaml .Values.monitoring.serviceMonitor.tlsConfig | nindent 8 }}
         {{- else }}
-        insecureSkipVerify: true
+        {{- required "monitoring.serviceMonitor.tlsConfig is required when monitoring.serviceMonitor.enabled=true (Sprint 6 ACQ DEPL-004 closure, 2026-05-16). Supply { caFile: \"/etc/prometheus/secrets/.../ca.crt\", serverName: \"certctl-server\" } to verify against your CA, or { insecureSkipVerify: true } to opt back into the pre-2026-05-16 default. See docs/operator/helm-deployment.md for the upgrade-path note." nil }}
         {{- end }}
       {{- with .Values.monitoring.serviceMonitor.bearerTokenSecret }}
       bearerTokenSecret:

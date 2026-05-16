@@ -94,6 +94,31 @@ helm upgrade certctl deploy/helm/certctl/ \
 
 Postgres state survives the upgrade (the PVC is retained). The server / agent images bump per the chart's `image.tag`. See [`docs/archive/upgrades/`](../archive/upgrades/) for version-specific upgrade guidance.
 
+### 2026-05-16 — ServiceMonitor TLS default flipped (DEPL-004)
+
+Acquisition-audit DEPL-004 closure. `monitoring.serviceMonitor.tlsConfig` was previously empty by default and the chart template fell through to `insecureSkipVerify: true`. Post-2026-05-16, the template emits a `{{ required ... }}` fail-closed message at `helm template` / `helm upgrade` time if neither a real verify nor an explicit opt-back is supplied.
+
+Operators with `monitoring.serviceMonitor.enabled: true` MUST set one of:
+
+```yaml
+# A. Real TLS verify against the chart's CA (production-shaped).
+monitoring:
+  serviceMonitor:
+    enabled: true
+    tlsConfig:
+      caFile: /etc/prometheus/secrets/certctl-ca/ca.crt
+      serverName: certctl-server
+
+# B. Demo / dev-cluster — operator-acknowledged opt-back to pre-flip default.
+monitoring:
+  serviceMonitor:
+    enabled: true
+    tlsConfig:
+      insecureSkipVerify: true
+```
+
+Operators with `monitoring.serviceMonitor.enabled: false` (the chart default) need no action — the template short-circuits before the `tlsConfig` block.
+
 ## Configuration reference
 
 Every value is documented at `deploy/helm/certctl/values.yaml`. Common tweaks:
