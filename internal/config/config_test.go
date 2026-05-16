@@ -1918,3 +1918,54 @@ func TestValidate_Bundle2_CORSConcreteAllowlist_Accepted(t *testing.T) {
 		t.Errorf("Validate() returned %v; want nil for concrete CORS allowlist", err)
 	}
 }
+
+// =============================================================================
+// DEPL-004 closure (Sprint 3, 2026-05-16). The Helm chart renders the
+// bundled-Postgres URL with a literal "$(POSTGRES_PASSWORD)"
+// placeholder. Kubernetes does NOT expand `$(VAR)` syntax when the env
+// is sourced from a Secret (valueFrom.secretKeyRef), so the server
+// receives the placeholder verbatim. expandDatabaseURL substitutes the
+// token with os.Getenv("POSTGRES_PASSWORD") at Load() time.
+// =============================================================================
+
+func TestExpandDatabaseURL_SubstitutesPlaceholder(t *testing.T) {
+	t.Setenv("POSTGRES_PASSWORD", "s3cret!")
+	in := "postgres://certctl:$(POSTGRES_PASSWORD)@db:5432/certctl?sslmode=disable"
+	got := expandDatabaseURL(in)
+	want := "postgres://certctl:s3cret!@db:5432/certctl?sslmode=disable"
+	if got != want {
+		t.Errorf("expandDatabaseURL = %q; want %q", got, want)
+	}
+}
+
+func TestExpandDatabaseURL_NoPlaceholderPassesThrough(t *testing.T) {
+	// External-Postgres deploys bake the password into the URL string
+	// — the helper must not touch URLs that don't carry the placeholder.
+	t.Setenv("POSTGRES_PASSWORD", "ignored")
+	in := "postgres://user:realpw@external:5432/db?sslmode=require"
+	if got := expandDatabaseURL(in); got != in {
+		t.Errorf("expandDatabaseURL on non-placeholder URL = %q; want %q (no-op)", got, in)
+	}
+}
+
+func TestExpandDatabaseURL_PlaceholderButNoEnvLeftAlone(t *testing.T) {
+	// When POSTGRES_PASSWORD is unset, leave the URL alone so the
+	// downstream connection failure is the same as before (misconfig
+	// is the operator's, not our regression).
+	t.Setenv("POSTGRES_PASSWORD", "")
+	in := "postgres://certctl:$(POSTGRES_PASSWORD)@db:5432/certctl?sslmode=disable"
+	if got := expandDatabaseURL(in); got != in {
+		t.Errorf("expandDatabaseURL with no POSTGRES_PASSWORD = %q; want unchanged %q", got, in)
+	}
+}
+
+func TestExpandDatabaseURL_MultipleOccurrences(t *testing.T) {
+	// Defensive: belt-and-suspenders. The chart only emits one
+	// placeholder today but ReplaceAll guards against future drift.
+	t.Setenv("POSTGRES_PASSWORD", "X")
+	in := "$(POSTGRES_PASSWORD)/$(POSTGRES_PASSWORD)"
+	want := "X/X"
+	if got := expandDatabaseURL(in); got != want {
+		t.Errorf("expandDatabaseURL = %q; want %q", got, want)
+	}
+}

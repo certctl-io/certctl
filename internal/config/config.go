@@ -333,7 +333,23 @@ func Load() (*Config, error) {
 			AuditFlushTimeoutSeconds: getEnvInt("CERTCTL_AUDIT_FLUSH_TIMEOUT_SECONDS", 30),
 		},
 		Database: DatabaseConfig{
-			URL: getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl"),
+			// DEPL-004 closure (Sprint 3, 2026-05-16). The Helm chart's
+			// _helpers.tpl renders the bundled-Postgres URL with a literal
+			// `$(POSTGRES_PASSWORD)` placeholder (see
+			// deploy/helm/certctl/templates/_helpers.tpl line 133). The
+			// Kubernetes env-substitution `$(VAR)` syntax ONLY expands
+			// when the value is a string literal in `env:` — values
+			// sourced from Secrets (via `valueFrom.secretKeyRef`) are
+			// passed through verbatim with no expansion. Pre-fix the
+			// server received the literal "postgres://user:$(POSTGRES_PASSWORD)@..."
+			// string and tried to dial Postgres with that as the password,
+			// failing with auth error and leaking the placeholder into
+			// error logs. expandDatabaseURL substitutes the placeholder
+			// with os.Getenv("POSTGRES_PASSWORD") when present; external-
+			// Postgres deploys that bake the password directly into the
+			// URL string are unaffected because there is no placeholder
+			// to match.
+			URL: expandDatabaseURL(getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl")),
 			// Phase 6 SCALE-M1 closure (2026-05-14): bumped default from
 			// 25 → 50 to relieve pool-saturation pressure on 1K+ agent /
 			// 10K+ cert fleets. Postgres default max_connections is 100
@@ -1267,6 +1283,37 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// expandDatabaseURL substitutes the literal "$(POSTGRES_PASSWORD)"
+// placeholder in a database URL with the value of the POSTGRES_PASSWORD
+// environment variable. DEPL-004 closure (Sprint 3, 2026-05-16).
+//
+// Kubernetes ONLY expands `$(VAR)` syntax when the env value is a
+// string literal in the Pod spec. Values sourced from
+// `valueFrom.secretKeyRef` (which is how the Helm chart wires
+// CERTCTL_DATABASE_URL) are NOT expanded — the literal makes it all
+// the way to the application. This helper does the expansion in-process
+// so the bundled-Postgres flow Just Works without a per-pod entrypoint
+// shim.
+//
+// Conservative: a strings.Replace on exactly one well-known token
+// (the chart's `_helpers.tpl` produces `$(POSTGRES_PASSWORD)` and
+// nothing else). External-Postgres deploys whose URL embeds the
+// real password don't match the placeholder and pass through untouched.
+// When POSTGRES_PASSWORD is unset, the URL is left as-is so the
+// downstream connection failure is the same as before (and a missing
+// password is the operator's mis-config, not our regression).
+func expandDatabaseURL(url string) string {
+	const placeholder = "$(POSTGRES_PASSWORD)"
+	if !strings.Contains(url, placeholder) {
+		return url
+	}
+	pw := os.Getenv("POSTGRES_PASSWORD")
+	if pw == "" {
+		return url
+	}
+	return strings.ReplaceAll(url, placeholder, pw)
 }
 
 // getEnvInt reads an integer environment variable with the given key and default value.
