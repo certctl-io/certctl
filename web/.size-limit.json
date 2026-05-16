@@ -1,0 +1,57 @@
+[
+  {
+    "name": "Main entry (index-*.js)",
+    "path": "dist/assets/index-*.js",
+    "limit": "30 KB"
+  },
+  {
+    "name": "vendor-recharts (chart library)",
+    "path": "dist/assets/vendor-recharts-*.js",
+    "limit": "110 KB"
+  },
+  {
+    "name": "vendor-react (react + react-dom)",
+    "path": "dist/assets/vendor-react-*.js",
+    "limit": "45 KB"
+  },
+  {
+    "name": "vendor-query (TanStack Query)",
+    "path": "dist/assets/vendor-query-*.js",
+    "limit": "10 KB"
+  },
+  {
+    "name": "vendor-router (React Router)",
+    "path": "dist/assets/vendor-router-*.js",
+    "limit": "10 KB"
+  },
+  {
+    "name": "vendor-icons (lucide-react subset)",
+    "path": "dist/assets/vendor-icons-*.js",
+    "limit": "8 KB"
+  },
+  {
+    "name": "OnboardingWizard (heaviest page chunk)",
+    "path": "dist/assets/OnboardingWizard-*.js",
+    "limit": "35 KB"
+  },
+  {
+    "name": "CommandPalette",
+    "path": "dist/assets/CommandPalette-*.js",
+    "limit": "18 KB"
+  },
+  {
+    "name": "Timestamp utility",
+    "path": "dist/assets/Timestamp-*.js",
+    "limit": "17 KB"
+  },
+  {
+    "name": "Total vendor JS",
+    "path": "dist/assets/vendor-*.js",
+    "limit": "180 KB"
+  },
+  {
+    "name": "Total app JS (all chunks combined)",
+    "path": "dist/assets/*.js",
+    "limit": "425 KB"
+  }
+]

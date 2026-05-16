@@ -466,6 +466,17 @@ jobs:
         working-directory: web
         run: npx vite build
 
+      - name: Frontend bundle-size budget (size-limit)
+        # Acquisition-audit SCALE-007 closure (Sprint 6 ACQ, 2026-05-16).
+        # Per-chunk + per-tier budgets in web/.size-limit.json; brotli-
+        # compressed sizes match real-world download cost. A regression
+        # that bloats a chunk past its cap fails this step and forces
+        # an explicit operator decision (fix vs raise cap with rationale).
+        # The script wrapper at scripts/ci-guards/G-frontend-bundle-budget.sh
+        # is the local-runnable counterpart; both invoke `npm run size`.
+        working-directory: web
+        run: npm run size
+
       - name: Regression guards (extracted to scripts/ci-guards/)
         # All named regression guards live at scripts/ci-guards/<id>.sh per
         # ci-pipeline-cleanup bundle Phase 1. Each guard is callable locally:
