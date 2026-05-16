@@ -96,20 +96,35 @@ Postgres state survives the upgrade (the PVC is retained). The server / agent im
 
 ### 2026-05-16 — ServiceMonitor TLS default flipped (DEPL-004)
 
-Acquisition-audit DEPL-004 closure. `monitoring.serviceMonitor.tlsConfig` was previously empty by default and the chart template fell through to `insecureSkipVerify: true`. Post-2026-05-16, the template emits a `{{ required ... }}` fail-closed message at `helm template` / `helm upgrade` time if neither a real verify nor an explicit opt-back is supplied.
+Acquisition-audit DEPL-004 closure. Pre-2026-05-16, `monitoring.serviceMonitor.tlsConfig` was empty by default and the chart template fell through to an implicit `insecureSkipVerify: true`. Post-2026-05-16, the values.yaml default is a real TLS verify against the chart's CA (caFile + serverName matching the existingSecret mount path the chart's Prometheus integration produces).
 
-Operators with `monitoring.serviceMonitor.enabled: true` MUST set one of:
+The new default works out of the box for the canonical install (the chart's `existingSecret` or cert-manager-emitted Secret mounted at `/etc/prometheus/secrets/certctl-ca/`):
 
 ```yaml
-# A. Real TLS verify against the chart's CA (production-shaped).
+# Default in values.yaml (no operator action required for the
+# canonical install path).
 monitoring:
   serviceMonitor:
     enabled: true
     tlsConfig:
       caFile: /etc/prometheus/secrets/certctl-ca/ca.crt
       serverName: certctl-server
+```
 
-# B. Demo / dev-cluster — operator-acknowledged opt-back to pre-flip default.
+Operators whose Prometheus pod mounts the CA bundle at a different path override `caFile`:
+
+```yaml
+monitoring:
+  serviceMonitor:
+    enabled: true
+    tlsConfig:
+      caFile: /path/to/your/ca.crt
+      serverName: your-cert-CN
+```
+
+Operators who genuinely need `insecureSkipVerify` (demo / dev clusters) must opt in **explicitly** — blanking the `tlsConfig` block trips the chart's `{{ fail }}` guard at render time:
+
+```yaml
 monitoring:
   serviceMonitor:
     enabled: true
@@ -117,7 +132,7 @@ monitoring:
       insecureSkipVerify: true
 ```
 
-Operators with `monitoring.serviceMonitor.enabled: false` (the chart default) need no action — the template short-circuits before the `tlsConfig` block.
+There is no way to inherit the pre-2026-05-16 implicit-skipVerify behavior silently. Operators with `monitoring.serviceMonitor.enabled: false` (the chart default) need no action — the template short-circuits before the `tlsConfig` block.
 
 ## Configuration reference
 

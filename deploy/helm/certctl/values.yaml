@@ -681,25 +681,33 @@ monitoring:
     #     key: api-key
     # bearerTokenSecret: {}
     # TLS config for the scrape endpoint. Acquisition-audit DEPL-004
-    # closure (Sprint 6 ACQ, 2026-05-16): the default flipped from
-    # `insecureSkipVerify: true` to fail-closed. Operators MUST supply
-    # tlsConfig — either a real verify (caFile / ca / serverName) for
-    # production, or explicit `{ insecureSkipVerify: true }` to opt
-    # back into the pre-2026-05-16 default. The ServiceMonitor template
-    # `{{ required ... }}` guard surfaces missing tlsConfig at chart-
-    # render time before it lands in-cluster.
+    # closure (Sprint 6 ACQ, 2026-05-16): pre-Sprint-6 the default was
+    # an implicit `insecureSkipVerify: true` (fell through the
+    # template's else-branch). Post-Sprint-6 the default is a real
+    # verify against the chart's CA at the canonical mount path the
+    # existingSecret pattern produces (Prometheus mounts the
+    # certctl-ca Secret as a volume at /etc/prometheus/secrets/
+    # certctl-ca/). Operators whose Prometheus pod mounts the bundle
+    # at a different path override `caFile` below; operators who
+    # genuinely want skipVerify back can do so explicitly. Operators
+    # who blank tlsConfig entirely (`tlsConfig: null` or
+    # `tlsConfig: {}`) trip the `{{ fail }}` guard in
+    # templates/servicemonitor.yaml at chart-render time — there is
+    # no way to inherit the pre-Sprint-6 implicit-skipVerify behavior
+    # silently.
     #
-    # In-cluster Prometheus that already trusts the certctl CA via
-    # the chart's existingSecret / cert-manager-emitted bundle: point
-    # caFile at that path (typically /etc/prometheus/secrets/<name>/ca.crt
-    # once you mount the Secret into the Prometheus pod).
+    # Production default (verify against the chart's CA):
+    tlsConfig:
+      caFile: /etc/prometheus/secrets/certctl-ca/ca.crt
+      serverName: certctl-server
     #
-    # Production-shaped example (verify against the chart's CA):
+    # Operator override — different CA mount path:
     # tlsConfig:
-    #   caFile: /etc/prometheus/secrets/certctl-ca/ca.crt
-    #   serverName: certctl-server
+    #   caFile: /path/to/your/ca.crt
+    #   serverName: your-cert-CN
     #
-    # Demo / dev-cluster escape hatch (operator-acknowledged):
+    # Operator override — demo / dev-cluster escape hatch
+    # (operator-acknowledged unsafe):
     # tlsConfig:
     #   insecureSkipVerify: true
     # Optional relabeling for the scrape job.

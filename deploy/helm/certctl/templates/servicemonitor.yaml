@@ -43,24 +43,24 @@ spec:
       scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout | default "10s" }}
       tlsConfig:
         # Acquisition-audit DEPL-004 closure (Sprint 6 ACQ, 2026-05-16).
-        # The default flipped from `insecureSkipVerify: true` to a
-        # fail-closed posture: operators MUST either supply a
-        # `monitoring.serviceMonitor.tlsConfig` block (caFile / ca /
-        # serverName for a real TLS verify) or opt back in explicitly
-        # with `tlsConfig: { insecureSkipVerify: true }`. The {{ required }}
-        # check below renders an error at `helm template` / `helm upgrade`
-        # time if neither is supplied, surfacing the misconfiguration
-        # before the ServiceMonitor lands in-cluster.
-        #
-        # In-cluster scrapes from a Prometheus pod that already trusts the
-        # certctl CA (via existingSecret + cert-manager) keep working with
-        # zero operator action — they just point at the right caFile.
-        # Out-of-cluster Prometheus deployments now require the operator
-        # to surface the trust decision explicitly.
+        # Pre-Sprint-6 the default was an implicit `insecureSkipVerify:
+        # true` (template fell through the else-branch). Post-Sprint-6
+        # values.yaml ships a real-verify default
+        # (caFile + serverName matching the chart's existingSecret /
+        # cert-manager-emitted Secret at /etc/prometheus/secrets/
+        # certctl-ca/), so the truthy `{{ if .Values.monitoring.
+        # serviceMonitor.tlsConfig }}` branch always fires for the
+        # default install. Operators who genuinely want skipVerify
+        # back must override with `tlsConfig: { insecureSkipVerify:
+        # true }` explicitly. Operators who blank tlsConfig entirely
+        # (`tlsConfig: null` or `tlsConfig: {}`) hit the else-branch
+        # below and trip the `{{ fail }}` at chart-render time —
+        # there is no way to inherit the pre-Sprint-6 implicit-
+        # skipVerify behavior silently.
         {{- if .Values.monitoring.serviceMonitor.tlsConfig }}
         {{- toYaml .Values.monitoring.serviceMonitor.tlsConfig | nindent 8 }}
         {{- else }}
-        {{- required "monitoring.serviceMonitor.tlsConfig is required when monitoring.serviceMonitor.enabled=true (Sprint 6 ACQ DEPL-004 closure, 2026-05-16). Supply { caFile: \"/etc/prometheus/secrets/.../ca.crt\", serverName: \"certctl-server\" } to verify against your CA, or { insecureSkipVerify: true } to opt back into the pre-2026-05-16 default. See docs/operator/helm-deployment.md for the upgrade-path note." nil }}
+        {{- fail "monitoring.serviceMonitor.tlsConfig was explicitly blanked but monitoring.serviceMonitor.enabled=true (Sprint 6 ACQ DEPL-004 closure, 2026-05-16). The values.yaml default ships caFile=/etc/prometheus/secrets/certctl-ca/ca.crt + serverName=certctl-server which matches the existingSecret mount pattern. If your Prometheus pod mounts the CA bundle at a different path, override caFile rather than blanking the block. If you genuinely need skipVerify, set `tlsConfig: { insecureSkipVerify: true }` explicitly — never blank. See docs/operator/helm-deployment.md for the upgrade-path note." }}
         {{- end }}
       {{- with .Values.monitoring.serviceMonitor.bearerTokenSecret }}
       bearerTokenSecret:
