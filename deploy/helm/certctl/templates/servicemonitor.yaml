@@ -47,28 +47,23 @@ spec:
         Pre-Sprint-6 the default was an implicit insecureSkipVerify
         true via the template falling through the else branch.
         Post-Sprint-6 values.yaml ships a real-verify default
-        (caFile + serverName matching the chart's existingSecret /
+        (caFile + serverName matching the chart existingSecret /
         cert-manager-emitted Secret at /etc/prometheus/secrets/
         certctl-ca/), so the truthy if-branch below always fires for
         the default install. Operators who want skipVerify back must
         override with tlsConfig insecureSkipVerify true explicitly.
-        Operators who blank tlsConfig entirely (tlsConfig null or
-        tlsConfig empty-map) hit the else-branch below and trip the
-        Helm fail directive at chart-render time — there is no way
-        to inherit the pre-Sprint-6 implicit-skipVerify behavior
-        silently.
-
-        NOTE: this comment uses Helm's {{- /* ... */ -}} comment
-        syntax, NOT YAML's # comments. The # form is parsed by YAML
-        but Helm's template engine still scans for {{ ... }} action
-        delimiters everywhere in the source text, including inside
-        YAML comments. Earlier drafts of this block used # comments
-        that referenced {{ if ... }} and {{ fail }} as descriptive
-        text — Helm tried to parse those as template actions, hit
-        invalid # tokens inside the action body, and aborted the
-        whole chart render. Lesson: descriptive references to
-        template actions go in Helm-comment blocks, never in YAML
-        comments.
+        Operators who blank tlsConfig entirely hit the else-branch
+        below and trip the Helm fail directive at chart-render time;
+        there is no way to inherit the pre-Sprint-6 implicit-skip
+        behavior silently. See docs/operator/helm-deployment.md for
+        the narrative explanation, including the lesson that comment
+        text referencing Helm template-action delimiters must live
+        in Helm-style comment blocks (this block), never in YAML
+        hash-comment blocks — the Helm lexer scans for action
+        delimiters everywhere in the source text, ignoring YAML
+        comment markers, so descriptive references to actions inside
+        YAML hash-comments are reinterpreted as template actions
+        and abort the entire chart render.
         */ -}}
         {{- if .Values.monitoring.serviceMonitor.tlsConfig }}
         {{- toYaml .Values.monitoring.serviceMonitor.tlsConfig | nindent 8 }}
