@@ -1,6 +1,6 @@
 # Architecture Guide
 
-> Last reviewed: 2026-05-05
+> Last reviewed: 2026-05-16
 
 ## Contents
 
@@ -54,6 +54,45 @@ New to certificates? Read the [Concepts Guide](concepts.md) first.
 6. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
 7. **Connector Architecture** — Pluggable issuers, targets, and notifiers for extensibility
 8. **Self-Hosted** — No cloud lock-in; run with Docker Compose, Kubernetes, or bare metal
+
+### Single-tenant deployment model
+
+certctl runs as a **single-tenant** application today. Every authenticated
+request is stamped with `auth.DefaultTenantID` by the auth middleware
+(`internal/auth/middleware.go` — the `TenantIDKey` context value is
+constant for the process lifetime), and repository queries don't filter
+on tenant. A deploy is one tenant; a buyer running multiple business
+units on one cluster needs one certctl deployment per business unit.
+
+The `tenant_id` columns sprinkled across the schema (`actors`,
+`managed_certificates`, `agents`, `users`, `roles`, audit log, etc.) are
+**forward-compatible scaffolding** for the multi-tenancy roadmap item
+in `WORKSPACE-ROADMAP.md`, not active multi-tenant code. A repo skimmer
+who sees the columns can reasonably assume tenant isolation is wired
+end-to-end; it isn't. The `scripts/ci-guards/multi-tenant-query-coverage.sh`
+guard exists to track the drift and is treated as informational (warns
+on net-new tenant_id-less queries above a baseline) — flipping it to a
+hard gate is the inflection-point work for activating multi-tenancy.
+
+Lifting this to a multi-tenant deployment requires three pieces of
+work in sequence:
+
+1. **Request-derived tenant resolution.** Replace the constant
+   `DefaultTenantID` stamp with a resolution function that picks
+   the tenant from the actor (`actors.tenant_id`) or a hostname /
+   path-prefix routing convention.
+2. **Per-query tenant scoping.** Every `WHERE` clause that joins
+   on a `tenant_id`-bearing table must add `AND tenant_id = $N`.
+   The multi-tenant-query-coverage guard tracks this surface;
+   activating multi-tenancy means driving its baseline to zero.
+3. **Per-tenant resource quotas + isolation tests.** RBAC scope
+   types extend with `tenant`; integration tests exercise
+   cross-tenant data-leak prevention; quotas (certs/issuers/agents
+   per tenant) wire into the existing limit-enforcement layer.
+
+Until that work lands, **the multi-tenant columns are decorative**.
+Treat them as you would a Postgres `version` column on a row you
+never read — the schema is forward-compat, the runtime is not.
 
 ## System Components
 
