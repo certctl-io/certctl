@@ -207,6 +207,10 @@ type mockJobRepo struct {
 	ListTimedOutErr         error
 	ListOfflineAgentJobsErr error
 	Updated                 []*domain.Job
+	// SCALE-001 closure (Sprint 2): records the most-recent `limit`
+	// passed to ClaimPendingJobs so tests can pin the per-tick cap
+	// propagation from JobService.SetClaimLimit.
+	LastClaimLimit int
 }
 
 func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
@@ -352,9 +356,13 @@ func (m *mockJobRepo) ListPendingByAgentID(ctx context.Context, agentID string) 
 // ClaimPendingJobs simulates the H-6 atomic claim semantics: matching rows are transitioned
 // Pending → Running before being returned. The in-memory mock has no concurrency primitives
 // beyond the existing mutex, which is sufficient for single-goroutine service tests.
+//
+// LastClaimLimit is recorded for SCALE-001 (Sprint 2) tests that pin the
+// per-tick cap propagation from JobService.SetClaimLimit.
 func (m *mockJobRepo) ClaimPendingJobs(ctx context.Context, jobType domain.JobType, limit int) ([]*domain.Job, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.LastClaimLimit = limit
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}

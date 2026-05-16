@@ -44,6 +44,14 @@ type JobService struct {
 	// wiring calls SetRenewalConcurrency(cfg.Scheduler.RenewalConcurrency)
 	// to switch on the bounded fan-out. Audit fix #9.
 	renewalConcurrency int
+
+	// claimLimit caps the number of Pending rows ProcessPendingJobs
+	// claims in a single tick via ClaimPendingJobs. 0 (zero-value)
+	// preserves the legacy "unlimited" semantics so existing test
+	// wiring keeps its byte-for-byte behaviour. Production wiring
+	// calls SetClaimLimit(cfg.Scheduler.JobClaimLimit) (default 1000).
+	// SCALE-001 closure (Sprint 2, 2026-05-16).
+	claimLimit int
 }
 
 // NewJobService creates a new job service.
@@ -93,6 +101,27 @@ func (s *JobService) SetRenewalConcurrency(n int) {
 	s.renewalConcurrency = n
 }
 
+// SetClaimLimit wires the per-tick cap on the number of Pending rows
+// ProcessPendingJobs claims from the JobRepository. Production wiring
+// passes cfg.Scheduler.JobClaimLimit (default 1000). Values ≤ 0 fall
+// back to 1000 — fail-safe rather than reverting to the legacy
+// unlimited semantics that SCALE-001 closed.
+//
+// Test wiring that constructs JobService via NewJobService and never
+// calls SetClaimLimit retains the historical limit:0 ClaimPendingJobs
+// invocation (the JobService.claimLimit zero-value), preserving
+// byte-for-byte unit-test behaviour. Repository-level tests that
+// exercise the LIMIT clause specifically pass a non-zero limit
+// directly to ClaimPendingJobs and don't go through this seam.
+//
+// SCALE-001 closure (Sprint 2, 2026-05-16).
+func (s *JobService) SetClaimLimit(n int) {
+	if n <= 0 {
+		n = 1000
+	}
+	s.claimLimit = n
+}
+
 // SetAuditService wires an optional audit service for emitting lifecycle
 // events (e.g., scheduler-driven job_retry transitions recorded by
 // RetryFailedJobs). Construction keeps the audit dependency optional so
@@ -112,8 +141,11 @@ func (s *JobService) SetAuditService(a *AuditService) {
 // idempotent against the pre-flipped state.
 func (s *JobService) ProcessPendingJobs(ctx context.Context) error {
 	// Claim pending jobs atomically (H-6 remediation: was ListByStatus which had no row lock).
-	// Empty jobType matches all types; zero limit means unlimited (preserves prior semantics).
-	pendingJobs, err := s.jobRepo.ClaimPendingJobs(ctx, "", 0)
+	// Empty jobType matches all types; claimLimit caps the per-tick claim
+	// (SCALE-001 closure — pre-fix limit:0 meant unlimited, which page-
+	// thrashed on 100K-job bursts). Zero claimLimit preserves legacy
+	// unlimited semantics for test wiring that hasn't called SetClaimLimit.
+	pendingJobs, err := s.jobRepo.ClaimPendingJobs(ctx, "", s.claimLimit)
 	if err != nil {
 		return fmt.Errorf("failed to claim pending jobs: %w", err)
 	}
@@ -123,7 +155,13 @@ func (s *JobService) ProcessPendingJobs(ctx context.Context) error {
 		return nil
 	}
 
-	s.logger.Info("processing pending jobs", "count", len(pendingJobs))
+	// SCALE-001: emit the per-tick claim count so operators can spot
+	// the cap engaging (when count == claimLimit, the queue is
+	// running ahead of the fan-out and the operator may want to bump
+	// CERTCTL_SCHEDULER_JOB_CLAIM_LIMIT or CERTCTL_RENEWAL_CONCURRENCY).
+	s.logger.Info("processing pending jobs",
+		"count", len(pendingJobs),
+		"claim_limit", s.claimLimit)
 
 	// Audit fix #9: bounded concurrent fan-out. When renewalConcurrency
 	// is the zero value (caller never set it), fall through to the

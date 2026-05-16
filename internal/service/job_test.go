@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -929,5 +930,90 @@ func TestJobService_ReapTimedOutJobs_RepoErrorPropagates(t *testing.T) {
 	// No audit events should be recorded when repo fails
 	if len(auditRepo.Events) != 0 {
 		t.Fatalf("expected 0 audit events after repo error, got %d", len(auditRepo.Events))
+	}
+}
+
+// =============================================================================
+// SCALE-001 closure (Sprint 2, 2026-05-16). JobService.SetClaimLimit
+// must propagate to the ClaimPendingJobs `limit` argument so a 100K-job
+// burst can't materialise the whole queue into process memory in one
+// tick. The cap engages: claim N rows per tick, leave the rest for the
+// next tick (JobProcessorInterval=30s default).
+//
+// Pre-fix the call was ClaimPendingJobs(ctx, "", 0) — limit 0 meant
+// unlimited. Post-fix the limit is the configured cap, default 1000
+// (wired in cmd/server/main.go), test wiring overrides via SetClaimLimit.
+// =============================================================================
+
+func TestProcessPendingJobs_RespectsClaimLimit(t *testing.T) {
+	ctx := context.Background()
+
+	now := time.Now()
+	// Stuff 10 pending renewal jobs.
+	jobs := make(map[string]*domain.Job, 10)
+	for i := 0; i < 10; i++ {
+		id := "job-claim-" + strconv.Itoa(i)
+		jobs[id] = &domain.Job{
+			ID:            id,
+			Type:          domain.JobTypeRenewal,
+			CertificateID: "cert-claim-" + strconv.Itoa(i),
+			Status:        domain.JobStatusPending,
+			Attempts:      0,
+			MaxAttempts:   3,
+			CreatedAt:     now,
+			ScheduledAt:   now,
+		}
+	}
+	jobRepo := &mockJobRepo{
+		Jobs:          jobs,
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+
+	jobService := newTestJobService(jobRepo)
+	jobService.SetClaimLimit(3)
+
+	if err := jobService.ProcessPendingJobs(ctx); err != nil {
+		// processing fails for renewal-without-cert; the limit invariant
+		// is asserted independently of downstream success.
+		t.Logf("ProcessPendingJobs returned error (expected): %v", err)
+	}
+
+	if jobRepo.LastClaimLimit != 3 {
+		t.Errorf("LastClaimLimit = %d; want 3 (SetClaimLimit must propagate)", jobRepo.LastClaimLimit)
+	}
+
+	// Count how many transitioned from Pending → Running via the mock's
+	// atomic-claim behaviour.
+	jobRepo.mu.Lock()
+	defer jobRepo.mu.Unlock()
+	var running int
+	for _, j := range jobRepo.Jobs {
+		if j.Status == domain.JobStatusRunning {
+			running++
+		}
+	}
+	if running != 3 {
+		t.Errorf("running-job count = %d; want 3 (claim cap should have stopped after 3)", running)
+	}
+}
+
+// TestSetClaimLimit_NormalisesNonPositive pins the fail-safe behaviour
+// — values ≤ 0 fall back to 1000 rather than reverting to the legacy
+// unlimited semantics that SCALE-001 closed.
+func TestSetClaimLimit_NormalisesNonPositive(t *testing.T) {
+	for _, in := range []int{0, -1, -1000} {
+		jobRepo := &mockJobRepo{
+			Jobs:          map[string]*domain.Job{},
+			StatusUpdates: make(map[string]domain.JobStatus),
+		}
+		svc := newTestJobService(jobRepo)
+		svc.SetClaimLimit(in)
+		// Drive a claim to capture LastClaimLimit.
+		if err := svc.ProcessPendingJobs(context.Background()); err != nil {
+			t.Fatalf("ProcessPendingJobs: %v", err)
+		}
+		if jobRepo.LastClaimLimit != 1000 {
+			t.Errorf("SetClaimLimit(%d): LastClaimLimit = %d; want 1000 (fail-safe default)", in, jobRepo.LastClaimLimit)
+		}
 	}
 }

@@ -808,6 +808,11 @@ func main() {
 	// CERTCTL_RENEWAL_CONCURRENCY; ≤0 normalised to 1 (sequential)
 	// inside the setter.
 	jobService.SetRenewalConcurrency(cfg.Scheduler.RenewalConcurrency)
+	// SCALE-001 closure (Sprint 2, 2026-05-16): per-tick ClaimPendingJobs
+	// cap so 100K-job bursts don't materialise the full queue into
+	// memory before the bounded fan-out engages. Setting normalises ≤0
+	// to 1000 (fail-safe vs. legacy unlimited semantics).
+	jobService.SetClaimLimit(cfg.Scheduler.JobClaimLimit)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	agentService.SetProfileRepo(profileRepo)
 	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, encryptionKey, logger)

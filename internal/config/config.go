@@ -350,7 +350,12 @@ func Load() (*Config, error) {
 			JobProcessorInterval: getEnvDuration("CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL", 30*time.Second),
 			// Audit fix #9 — per-tick concurrency cap on the renewal/issuance/
 			// deployment goroutine fan-out. ≤0 → 1 (sequential).
-			RenewalConcurrency:          getEnvInt("CERTCTL_RENEWAL_CONCURRENCY", 25),
+			RenewalConcurrency: getEnvInt("CERTCTL_RENEWAL_CONCURRENCY", 25),
+			// SCALE-001 closure (Sprint 2, 2026-05-16) — per-tick claim cap on
+			// the scheduler's ClaimPendingJobs sweep. Default 1000 keeps the
+			// fan-out busy (≈40× the renewal-concurrency cap) without
+			// page-thrashing on a 100K-job burst. ≤0 → 1000 (fail-safe).
+			JobClaimLimit:               getEnvInt("CERTCTL_SCHEDULER_JOB_CLAIM_LIMIT", 1000),
 			AgentHealthCheckInterval:    getEnvDuration("CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL", 2*time.Minute),
 			NotificationProcessInterval: getEnvDuration("CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL", 1*time.Minute),
 			// I-005: retry sweep for failed notifications. Mirrors RetryInterval

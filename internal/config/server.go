@@ -170,6 +170,26 @@ type SchedulerConfig struct {
 	// Setting: CERTCTL_RENEWAL_CONCURRENCY environment variable.
 	RenewalConcurrency int
 
+	// JobClaimLimit caps the number of Pending rows a single
+	// scheduler tick may claim via repository.JobRepository.ClaimPendingJobs.
+	// Default 1000.
+	//
+	// SCALE-001 closure (Sprint 2, 2026-05-16). Pre-fix the scheduler
+	// invoked ClaimPendingJobs with limit:0, which loads every Pending
+	// row in a single transaction. A 100K-job burst (cert-fleet sweep,
+	// post-outage recovery, etc.) would marshal the full queue into
+	// process memory before boundedFanOut's semaphore could back-
+	// pressure the upstream CAs. Capping the claim per tick keeps
+	// memory bounded; the next tick (JobProcessorInterval=30s default)
+	// picks up the rest.
+	//
+	// Operator-tune: bump for very-large-fleet deploys where 1000
+	// per 30s isn't enough throughput. Values ≤ 0 fall back to 1000
+	// rather than the legacy unlimited semantics — fail-safe.
+	//
+	// Setting: CERTCTL_SCHEDULER_JOB_CLAIM_LIMIT environment variable.
+	JobClaimLimit int
+
 	// AgentHealthCheckInterval is how often the scheduler checks agent heartbeats.
 	// Default: 2 minutes. Minimum: 1 second. Marks agents offline if no recent heartbeat.
 	// Setting: CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL environment variable.
