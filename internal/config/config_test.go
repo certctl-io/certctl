@@ -232,6 +232,14 @@ func TestLoad_AllEnvVarsSet(t *testing.T) {
 	t.Setenv("CERTCTL_RATE_LIMIT_BURST", "200")
 	t.Setenv("CERTCTL_CORS_ORIGINS", "https://a.com,https://b.com")
 	t.Setenv("CERTCTL_KEYGEN_MODE", "server")
+	// Sprint 4 ARCH-003 made Load()→Validate() refuse to boot in
+	// server-keygen mode without an explicit demo-mode acknowledgement.
+	// This test exercises the "every CERTCTL_* env var set" path, so
+	// it sets KEYGEN_MODE=server — which now requires the demo-ack
+	// pair. Mirror the SEC-H3 demo-ack pattern: ACK=true + fresh TS
+	// within the 24h window.
+	t.Setenv("CERTCTL_DEMO_MODE_ACK", "true")
+	t.Setenv("CERTCTL_DEMO_MODE_ACK_TS", strconv.FormatInt(time.Now().Unix(), 10))
 	t.Setenv("CERTCTL_LOG_LEVEL", "debug")
 	t.Setenv("CERTCTL_LOG_FORMAT", "text")
 	t.Setenv("CERTCTL_DATABASE_URL", "postgres://user:pass@db:5432/certctl")
@@ -2076,6 +2084,9 @@ func TestValidate_AcceptsServerKeygenWithDemoAck(t *testing.T) {
 			NotificationProcessInterval: 1 * time.Minute,
 			NotificationRetryInterval:   2 * time.Minute,
 			RetryInterval:               5 * time.Minute,
+			JobTimeoutInterval:          10 * time.Minute,
+			AwaitingCSRTimeout:          24 * time.Hour,
+			AwaitingApprovalTimeout:     168 * time.Hour,
 		},
 	}
 	if err := cfg.Validate(); err != nil {
@@ -2100,6 +2111,9 @@ func TestValidate_AgentKeygenIgnoresDemoAck(t *testing.T) {
 			NotificationProcessInterval: 1 * time.Minute,
 			NotificationRetryInterval:   2 * time.Minute,
 			RetryInterval:               5 * time.Minute,
+			JobTimeoutInterval:          10 * time.Minute,
+			AwaitingCSRTimeout:          24 * time.Hour,
+			AwaitingApprovalTimeout:     168 * time.Hour,
 		},
 	}
 	if err := cfg.Validate(); err != nil {
