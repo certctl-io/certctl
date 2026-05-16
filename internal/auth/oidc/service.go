@@ -948,8 +948,19 @@ func (s *Service) fetchUserinfoGroups(
 	if entry.provider.UserInfoEndpoint() == "" {
 		return nil, fmt.Errorf("oidc: userinfo fallback configured but provider has no userinfo endpoint")
 	}
-	ts := entry.oauthConfig.TokenSource(ctx, token)
-	uinfo, err := entry.provider.UserInfo(ctx, ts)
+	// Acquisition-audit SEC-020 closure (Sprint 1 follow-up to SEC-001,
+	// 2026-05-16). Wrap ctx via SafeOIDCContext before TokenSource +
+	// UserInfo so the SSRF guard owned by validation.SafeHTTPDialContext
+	// re-resolves the userinfo endpoint at dial time and refuses reserved
+	// addresses (loopback / link-local / cloud-metadata). The single wrap
+	// covers both legs because gooidc.ClientContext and oauth2.TokenSource
+	// both read the same oauth2.HTTPClient context key (see go-oidc/v3
+	// oidc.go:57-65 and golang.org/x/oauth2 oauth2.go:339-341). Production
+	// provider-load paths in this package already use SafeOIDCContext; the
+	// userinfo fallback was missed in the SEC-001 sweep.
+	safeCtx := SafeOIDCContext(ctx)
+	ts := entry.oauthConfig.TokenSource(safeCtx, token)
+	uinfo, err := entry.provider.UserInfo(safeCtx, ts)
 	if err != nil {
 		return nil, fmt.Errorf("oidc: userinfo fetch: %w", err)
 	}

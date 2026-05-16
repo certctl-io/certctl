@@ -9,6 +9,31 @@ package oidc
 //   - test_discovery.go:65  (dry-run validator from the GUI)
 //   - service.go:1066       (runtime provider load on first cache miss)
 //
+// Acquisition-audit follow-up SEC-020 + SEC-021 (Sprint 1 follow-up,
+// 2026-05-16) extended the same wrap to two adjacent call sites that
+// the original SEC-001 sweep missed:
+//
+//   - service.go::fetchUserinfoGroups (~L948-961, SEC-020 closure) —
+//     the userinfo-fallback path called entry.provider.UserInfo(ctx, ts)
+//     with bare ctx. go-oidc/v3 Provider.UserInfo derives its HTTP
+//     client from the context via getClient(ctx) (oidc.go:61-65);
+//     without an override, the internal doRequest falls through to
+//     http.DefaultClient.
+//   - internal/api/handler/auth_session_oidc_bcl.go::Verify (~L125,
+//     SEC-021 closure) — the back-channel-logout verifier performs a
+//     per-request discovery re-fetch via gooidc.NewProvider(ctx, ...)
+//     with bare ctx; SafeOIDCContext now wraps before the call.
+//
+// Context-key shape: gooidc.ClientContext is implemented as
+//   context.WithValue(ctx, oauth2.HTTPClient, client)
+// (go-oidc v3.18.0 oidc.go:57-59). Both go-oidc's getClient AND
+// golang.org/x/oauth2's internal.ContextClient read oauth2.HTTPClient,
+// so the SINGLE SafeOIDCContext wrap covers go-oidc-driven HTTP calls
+// (Provider.UserInfo / NewProvider discovery / Verifier JWKS) AND
+// oauth2-driven HTTP calls (Config.TokenSource refresh / Exchange).
+// No additional context.WithValue(ctx, oauth2.HTTPClient, ...) is
+// required alongside the wrap.
+//
 // gooidc.NewProvider derives its HTTP client from the context via
 // oidc.ClientContext; with no override it falls through to
 // http.DefaultClient. The default client has no SSRF guard, so an admin

@@ -19,11 +19,15 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"golang.org/x/oauth2"
+
+	gooidc "github.com/coreos/go-oidc/v3/oidc"
 
 	oidcdomain "github.com/certctl-io/certctl/internal/auth/oidc/domain"
 	userdomain "github.com/certctl-io/certctl/internal/auth/user/domain"
 	cryptopkg "github.com/certctl-io/certctl/internal/crypto"
 	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // sha384New returns a SHA-384 hash via crypto/sha512 (Go stdlib).
@@ -2398,5 +2402,108 @@ func TestService_UpsertUser_ValidateErrorOnEmptyEmail(t *testing.T) {
 	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "validate") {
 		t.Errorf("err = %v; want validate wrap", err)
+	}
+}
+
+// Acquisition-audit SEC-020 closure (Sprint 1 follow-up to SEC-001,
+// 2026-05-16). fetchUserinfoGroups previously called
+// entry.provider.UserInfo(ctx, ts) with the bare request context. go-oidc
+// /v3's Provider.UserInfo derives its http.Client from ctx via
+// getClient(ctx) (oidc.go:61-65); without an override the internal
+// doRequest falls through to http.DefaultClient — an unwrapped client
+// with no SSRF guard. The fix wraps ctx via SafeOIDCContext so the
+// dial-time SafeHTTPDialContext guard re-resolves the userinfo
+// endpoint and rejects reserved-address answers.
+//
+// This test exercises the wrap end-to-end:
+//
+//  1. Stand up a discovery httptest server (loopback) whose discovery
+//     doc advertises userinfo_endpoint = "http://169.254.169.254/userinfo"
+//     (link-local cloud-metadata range — rejected by
+//     validation.SafeHTTPDialContext.isReservedIPForDial).
+//  2. Construct the *gooidc.Provider via the test-bypassed
+//     oidcDiscoveryClient (setup_test.go's init() leaves it bypassed for
+//     the package).
+//  3. Restore the production-shape oidcDiscoveryClient (the one whose
+//     Transport.DialContext is validation.SafeHTTPDialContext) BEFORE
+//     calling fetchUserinfoGroups, so the SafeOIDCContext wrap inside
+//     the function captures the production guard at ctx-wrap time.
+//  4. Call fetchUserinfoGroups and assert the resulting error wraps the
+//     dial-time reserved-address rejection (substring "refusing to
+//     dial" / "reserved address"), not a generic transport error.
+//
+// The test does NOT use t.Parallel() — it mutates the package-level
+// oidcDiscoveryClient and must run serially against any other test that
+// reads the same var.
+func TestFetchUserinfoGroups_SSRF_BlocksReservedAddress(t *testing.T) {
+	// Stand up a loopback discovery server. Discovery doc's
+	// userinfo_endpoint points at the link-local cloud-metadata IP so
+	// the subsequent UserInfo dial trips SafeHTTPDialContext.
+	var discoveryURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		doc := map[string]interface{}{
+			"issuer":                                discoveryURL,
+			"authorization_endpoint":                discoveryURL + "/authorize",
+			"token_endpoint":                        discoveryURL + "/token",
+			"jwks_uri":                              discoveryURL + "/jwks",
+			"userinfo_endpoint":                     "http://169.254.169.254/userinfo",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+			"response_types_supported":              []string{"code"},
+			"subject_types_supported":               []string{"public"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(doc)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	discoveryURL = srv.URL
+
+	// Build the *gooidc.Provider using the test-bypassed discovery
+	// client (setup_test.go init() already swapped oidcDiscoveryClient
+	// to a DefaultTransport-backed client so the httptest loopback URL
+	// resolves cleanly).
+	ctx := context.Background()
+	provider, err := gooidc.NewProvider(SafeOIDCContext(ctx), discoveryURL)
+	if err != nil {
+		t.Fatalf("NewProvider against loopback discovery server: %v", err)
+	}
+	if got := provider.UserInfoEndpoint(); got != "http://169.254.169.254/userinfo" {
+		t.Fatalf("provider.UserInfoEndpoint() = %q; want link-local override", got)
+	}
+
+	// Restore the production-shape SafeHTTPDialContext-backed client
+	// just before the call. SafeOIDCContext inside fetchUserinfoGroups
+	// will pick THIS client up because gooidc.ClientContext reads the
+	// package-level var at wrap time.
+	saved := oidcDiscoveryClient
+	t.Cleanup(func() { oidcDiscoveryClient = saved })
+	oidcDiscoveryClient = &http.Client{
+		Timeout: oidcOutboundTimeout,
+		Transport: &http.Transport{
+			DialContext: validation.SafeHTTPDialContext(oidcOutboundTimeout),
+		},
+	}
+
+	entry := &providerEntry{
+		provider: provider,
+		oauthConfig: &oauth2.Config{
+			ClientID:     "test-client",
+			ClientSecret: "test-secret",
+			Endpoint:     oauth2.Endpoint{TokenURL: discoveryURL + "/token"},
+		},
+	}
+	svc := &Service{}
+	_, err = svc.fetchUserinfoGroups(ctx, entry, &oauth2.Token{AccessToken: "test-access-token"}, "groups")
+	if err == nil {
+		t.Fatal("fetchUserinfoGroups against link-local userinfo endpoint: expected SSRF reject; got nil")
+	}
+	msg := err.Error()
+	// SafeHTTPDialContext emits one of two messages for the literal-IP
+	// case: "refusing to dial reserved address <ip>". Either is the
+	// load-bearing signal we want — a generic connect-refused / EOF
+	// would mean the guard didn't fire.
+	if !strings.Contains(msg, "refusing to dial") && !strings.Contains(msg, "reserved address") {
+		t.Errorf("fetchUserinfoGroups err = %q; want SafeHTTPDialContext reserved-address rejection", msg)
 	}
 }
