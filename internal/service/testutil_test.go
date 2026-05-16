@@ -15,6 +15,27 @@ import (
 
 var errNotFound = errors.New("not found")
 
+// sliceWindow is a tiny helper for the SCALE-002 mock ListPaginated
+// implementations. It mirrors the SQL LIMIT/OFFSET window over an
+// in-memory slice with the same normalisation as the postgres repos
+// (limit≤0 → return as-is; offset<0 → 0; out-of-range → empty).
+func sliceWindow[T any](all []T, limit, offset int) []T {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(all) {
+		return nil
+	}
+	if limit <= 0 {
+		return all[offset:]
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end]
+}
+
 // testEncryptionKey is a deterministic passphrase for unit tests that
 // exercise IssuerService/TargetService write paths. After the C-2 remediation
 // these services fail closed when no key is configured, so happy-path tests
@@ -1246,6 +1267,15 @@ func (m *mockTargetRepo) List(ctx context.Context) ([]*domain.DeploymentTarget, 
 	return targets, nil
 }
 
+// ListPaginated mirrors the SQL-side window. SCALE-002 closure (Sprint 2).
+func (m *mockTargetRepo) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.DeploymentTarget, int64, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return sliceWindow(all, limit, offset), int64(len(all)), nil
+}
+
 func (m *mockTargetRepo) Get(ctx context.Context, id string) (*domain.DeploymentTarget, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1533,6 +1563,15 @@ func (m *mockIssuerRepository) List(ctx context.Context) ([]*domain.Issuer, erro
 		issuers = append(issuers, i)
 	}
 	return issuers, nil
+}
+
+// ListPaginated mirrors the SQL-side window. SCALE-002 closure (Sprint 2).
+func (m *mockIssuerRepository) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.Issuer, int64, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return sliceWindow(all, limit, offset), int64(len(all)), nil
 }
 
 func (m *mockIssuerRepository) Get(ctx context.Context, id string) (*domain.Issuer, error) {

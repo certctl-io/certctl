@@ -31,6 +31,9 @@ func NewTeamService(
 }
 
 // List returns a paginated list of teams.
+//
+// SCALE-002 closure (Sprint 2, 2026-05-16): pagination is pushed into
+// the SQL layer via TeamRepository.ListPaginated.
 func (s *TeamService) List(ctx context.Context, page, perPage int) ([]*domain.Team, int64, error) {
 	if page < 1 {
 		page = 1
@@ -38,21 +41,8 @@ func (s *TeamService) List(ctx context.Context, page, perPage int) ([]*domain.Te
 	if perPage < 1 {
 		perPage = 50
 	}
-
-	teams, err := s.teamRepo.List(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list teams: %w", err)
-	}
-	total := int64(len(teams))
-	start := (page - 1) * perPage
-	if start >= int(total) {
-		return nil, total, nil
-	}
-	end := start + perPage
-	if end > int(total) {
-		end = int(total)
-	}
-	return teams[start:end], total, nil
+	offset := (page - 1) * perPage
+	return s.teamRepo.ListPaginated(ctx, perPage, offset)
 }
 
 // Get retrieves a team by ID.

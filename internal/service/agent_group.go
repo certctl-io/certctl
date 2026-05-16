@@ -31,27 +31,28 @@ func NewAgentGroupService(
 }
 
 // ListAgentGroups returns paginated agent groups (handler interface method).
+//
+// SCALE-002 closure (Sprint 2, 2026-05-16): pagination is now pushed
+// into the SQL layer via AgentGroupRepository.ListPaginated, closing
+// the Bundle E / Audit L-020 "page/perPage unused" gap.
 func (s *AgentGroupService) ListAgentGroups(ctx context.Context, page, perPage int) ([]domain.AgentGroup, int64, error) {
-	// Bundle E / Audit L-020: page/perPage are unused; the underlying repo
-	// List() does not yet take pagination params. Marked explicitly so
-	// ineffassign sees no dead store and future maintainers see the
-	// vestigial params rather than a misleading default-applied clamp.
-	_ = page
-	_ = perPage
-
-	groups, err := s.groupRepo.List(ctx)
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+	offset := (page - 1) * perPage
+	groups, total, err := s.groupRepo.ListPaginated(ctx, perPage, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list agent groups: %w", err)
 	}
-	total := int64(len(groups))
-
 	var result []domain.AgentGroup
 	for _, g := range groups {
 		if g != nil {
 			result = append(result, *g)
 		}
 	}
-
 	return result, total, nil
 }
 

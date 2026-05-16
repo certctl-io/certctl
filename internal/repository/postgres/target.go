@@ -82,6 +82,48 @@ func (r *TargetRepository) List(ctx context.Context) ([]*domain.DeploymentTarget
 	return targets, nil
 }
 
+// ListPaginated returns a slice of deployment targets bounded by limit/offset
+// plus the total row count. SCALE-002 closure (Sprint 2, 2026-05-16) — pushes
+// pagination into SQL so the admin UI doesn't marshal the entire targets
+// table per request. limit≤0 is normalised to 50; offset<0 to 0.
+func (r *TargetRepository) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.DeploymentTarget, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deployment_targets`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count targets: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT `+targetSelectColumns+`
+		FROM deployment_targets
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query targets: %w", err)
+	}
+	defer rows.Close()
+
+	var targets []*domain.DeploymentTarget
+	for rows.Next() {
+		var t domain.DeploymentTarget
+		if err := scanTarget(rows, &t); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan target: %w", err)
+		}
+		targets = append(targets, &t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating target rows: %w", err)
+	}
+	return targets, total, nil
+}
+
 // Get retrieves a target by ID
 func (r *TargetRepository) Get(ctx context.Context, id string) (*domain.DeploymentTarget, error) {
 	var target domain.DeploymentTarget

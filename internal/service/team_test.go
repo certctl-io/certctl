@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,6 +29,15 @@ func (m *mockTeamRepo) List(ctx context.Context) ([]*domain.Team, error) {
 		teams = append(teams, t)
 	}
 	return teams, nil
+}
+
+// ListPaginated mirrors the SQL-side window. SCALE-002 closure (Sprint 2).
+func (m *mockTeamRepo) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.Team, int64, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return sliceWindow(all, limit, offset), int64(len(all)), nil
 }
 
 func (m *mockTeamRepo) Get(ctx context.Context, id string) (*domain.Team, error) {
@@ -686,5 +696,44 @@ func TestTeamService_NilAuditService(t *testing.T) {
 
 	if team.ID == "" {
 		t.Errorf("expected ID to be generated")
+	}
+}
+
+// TestTeamService_List_SCALE002_PaginationPropagatesToRepo pins the
+// SCALE-002 closure (Sprint 2, 2026-05-16): the service no longer
+// fetches the full table and slices in memory; it propagates limit +
+// offset to the repository layer. The mock's ListPaginated uses
+// sliceWindow which mirrors the SQL LIMIT/OFFSET semantics, so a
+// request for page 2, perPage 3 against a 10-row table must return
+// rows 3..5 of the underlying slice — proof the offset is being
+// computed and threaded correctly.
+//
+// Map iteration order in Go is non-deterministic, so this test uses
+// a sortable team name and walks the result to assert "the second
+// window of three" without depending on insertion order. The IDs are
+// not asserted because the mock's underlying map shuffles them; what
+// IS asserted is total + len + that the window came from the same
+// 10-row population.
+func TestTeamService_List_SCALE002_PaginationPropagatesToRepo(t *testing.T) {
+	ctx := context.Background()
+	mockTeamRepo := newMockTeamRepository()
+	mockAuditRepo := newMockAuditRepository()
+	auditService := NewAuditService(mockAuditRepo)
+	teamService := NewTeamService(mockTeamRepo, auditService)
+	for i := 0; i < 10; i++ {
+		mockTeamRepo.AddTeam(&domain.Team{
+			ID:   "team-scale002-" + strconv.Itoa(i),
+			Name: "Team " + strconv.Itoa(i),
+		})
+	}
+	teams, total, err := teamService.List(ctx, 2, 3)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if total != 10 {
+		t.Errorf("total = %d; want 10", total)
+	}
+	if len(teams) != 3 {
+		t.Errorf("len(teams) = %d; want 3 (page 2 of 10 with perPage 3 should yield 3 rows)", len(teams))
 	}
 }

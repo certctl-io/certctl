@@ -53,6 +53,44 @@ func (r *TeamRepository) List(ctx context.Context) ([]*domain.Team, error) {
 	return teams, nil
 }
 
+// ListPaginated returns a slice of teams bounded by limit/offset plus the
+// total count. SCALE-002 closure (Sprint 2, 2026-05-16).
+func (r *TeamRepository) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.Team, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count teams: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, description, created_at, updated_at
+		FROM teams
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query teams: %w", err)
+	}
+	defer rows.Close()
+	var teams []*domain.Team
+	for rows.Next() {
+		var team domain.Team
+		if err := rows.Scan(&team.ID, &team.Name, &team.Description,
+			&team.CreatedAt, &team.UpdatedAt); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan team: %w", err)
+		}
+		teams = append(teams, &team)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating team rows: %w", err)
+	}
+	return teams, total, nil
+}
+
 // Get retrieves a team by ID
 func (r *TeamRepository) Get(ctx context.Context, id string) (*domain.Team, error) {
 	var team domain.Team

@@ -58,6 +58,9 @@ func (s *IssuerService) GetRegistry() *IssuerRegistry {
 }
 
 // List returns a paginated list of issuers.
+//
+// SCALE-002 closure (Sprint 2, 2026-05-16): pagination is pushed into
+// the SQL layer via IssuerRepository.ListPaginated.
 func (s *IssuerService) List(ctx context.Context, page, perPage int) ([]*domain.Issuer, int64, error) {
 	if page < 1 {
 		page = 1
@@ -65,21 +68,8 @@ func (s *IssuerService) List(ctx context.Context, page, perPage int) ([]*domain.
 	if perPage < 1 {
 		perPage = 50
 	}
-
-	issuers, err := s.issuerRepo.List(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list issuers: %w", err)
-	}
-	total := int64(len(issuers))
-	start := (page - 1) * perPage
-	if start >= int(total) {
-		return nil, total, nil
-	}
-	end := start + perPage
-	if end > int(total) {
-		end = int(total)
-	}
-	return issuers[start:end], total, nil
+	offset := (page - 1) * perPage
+	return s.issuerRepo.ListPaginated(ctx, perPage, offset)
 }
 
 // Get retrieves an issuer by ID.

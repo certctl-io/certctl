@@ -44,6 +44,40 @@ func (r *AgentGroupRepository) List(ctx context.Context) ([]*domain.AgentGroup, 
 	return groups, rows.Err()
 }
 
+// ListPaginated returns a slice of agent groups bounded by limit/offset
+// plus the total count. SCALE-002 closure (Sprint 2, 2026-05-16).
+func (r *AgentGroupRepository) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.AgentGroup, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_groups`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count agent groups: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, description, match_os, match_architecture, match_ip_cidr, match_version, enabled, created_at, updated_at
+		 FROM agent_groups ORDER BY name LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query agent groups: %w", err)
+	}
+	defer rows.Close()
+	var groups []*domain.AgentGroup
+	for rows.Next() {
+		g, err := scanAgentGroup(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		groups = append(groups, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return groups, total, nil
+}
+
 // Get retrieves an agent group by ID.
 func (r *AgentGroupRepository) Get(ctx context.Context, id string) (*domain.AgentGroup, error) {
 	row := r.db.QueryRowContext(ctx,

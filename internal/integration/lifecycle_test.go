@@ -961,6 +961,25 @@ func (m *mockTargetRepository) List(ctx context.Context) ([]*domain.DeploymentTa
 	return targets, nil
 }
 
+// ListPaginated mirrors the SQL-side window. SCALE-002 closure (Sprint 2).
+func (m *mockTargetRepository) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.DeploymentTarget, int64, error) {
+	all, _ := m.List(ctx)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(all) {
+		return nil, int64(len(all)), nil
+	}
+	if limit <= 0 {
+		return all[offset:], int64(len(all)), nil
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], int64(len(all)), nil
+}
+
 func (m *mockTargetRepository) Get(ctx context.Context, id string) (*domain.DeploymentTarget, error) {
 	target, ok := m.targets[id]
 	if !ok {
@@ -1231,6 +1250,25 @@ func (m *mockIssuerRepository) List(ctx context.Context) ([]*domain.Issuer, erro
 		issuers = append(issuers, i)
 	}
 	return issuers, nil
+}
+
+// ListPaginated mirrors the SQL-side window. SCALE-002 closure (Sprint 2).
+func (m *mockIssuerRepository) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.Issuer, int64, error) {
+	all, _ := m.List(ctx)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(all) {
+		return nil, int64(len(all)), nil
+	}
+	if limit <= 0 {
+		return all[offset:], int64(len(all)), nil
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], int64(len(all)), nil
 }
 
 func (m *mockIssuerRepository) Get(ctx context.Context, id string) (*domain.Issuer, error) {

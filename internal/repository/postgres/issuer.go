@@ -57,6 +57,48 @@ func (r *IssuerRepository) List(ctx context.Context) ([]*domain.Issuer, error) {
 	return issuers, nil
 }
 
+// ListPaginated returns a slice of issuers bounded by limit/offset plus the
+// total count. SCALE-002 closure (Sprint 2, 2026-05-16).
+func (r *IssuerRepository) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.Issuer, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM issuers`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count issuers: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, type, config, COALESCE(encrypted_config, NULL), enabled,
+		       last_tested_at, COALESCE(test_status, 'untested'), COALESCE(source, 'database'),
+		       created_at, updated_at
+		FROM issuers
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query issuers: %w", err)
+	}
+	defer rows.Close()
+	var issuers []*domain.Issuer
+	for rows.Next() {
+		var iss domain.Issuer
+		if err := rows.Scan(&iss.ID, &iss.Name, &iss.Type, &iss.Config,
+			&iss.EncryptedConfig, &iss.Enabled,
+			&iss.LastTestedAt, &iss.TestStatus, &iss.Source,
+			&iss.CreatedAt, &iss.UpdatedAt); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan issuer: %w", err)
+		}
+		issuers = append(issuers, &iss)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating issuer rows: %w", err)
+	}
+	return issuers, total, nil
+}
+
 // Get retrieves an issuer by ID
 func (r *IssuerRepository) Get(ctx context.Context, id string) (*domain.Issuer, error) {
 	var issuer domain.Issuer

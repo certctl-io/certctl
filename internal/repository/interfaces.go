@@ -210,6 +210,11 @@ type OCSPResponderRepository interface {
 type IssuerRepository interface {
 	// List returns all issuers, optionally filtered.
 	List(ctx context.Context) ([]*domain.Issuer, error)
+	// ListPaginated returns a window of issuers (sorted by created_at DESC)
+	// plus the total row count. SCALE-002 closure (Sprint 2, 2026-05-16) —
+	// pushes pagination into the SQL layer so admin pages don't marshal
+	// the full table per request.
+	ListPaginated(ctx context.Context, limit, offset int) ([]*domain.Issuer, int64, error)
 	// Get retrieves an issuer by ID.
 	Get(ctx context.Context, id string) (*domain.Issuer, error)
 	// Create stores a new issuer.
@@ -227,6 +232,10 @@ type IssuerRepository interface {
 type TargetRepository interface {
 	// List returns all targets, optionally filtered.
 	List(ctx context.Context) ([]*domain.DeploymentTarget, error)
+	// ListPaginated returns a window of deployment targets (sorted by
+	// created_at DESC) plus the total row count. SCALE-002 closure
+	// (Sprint 2, 2026-05-16).
+	ListPaginated(ctx context.Context, limit, offset int) ([]*domain.DeploymentTarget, int64, error)
 	// Get retrieves a target by ID.
 	Get(ctx context.Context, id string) (*domain.DeploymentTarget, error)
 	// Create stores a new target.
@@ -550,6 +559,9 @@ type NotificationRepository interface {
 type TeamRepository interface {
 	// List returns all teams.
 	List(ctx context.Context) ([]*domain.Team, error)
+	// ListPaginated returns a window of teams (sorted by created_at DESC)
+	// plus the total row count. SCALE-002 closure (Sprint 2, 2026-05-16).
+	ListPaginated(ctx context.Context, limit, offset int) ([]*domain.Team, int64, error)
 	// Get retrieves a team by ID.
 	Get(ctx context.Context, id string) (*domain.Team, error)
 	// Create stores a new team.
@@ -578,6 +590,9 @@ type CertificateProfileRepository interface {
 type AgentGroupRepository interface {
 	// List returns all agent groups.
 	List(ctx context.Context) ([]*domain.AgentGroup, error)
+	// ListPaginated returns a window of agent groups (sorted by name)
+	// plus the total row count. SCALE-002 closure (Sprint 2, 2026-05-16).
+	ListPaginated(ctx context.Context, limit, offset int) ([]*domain.AgentGroup, int64, error)
 	// Get retrieves an agent group by ID.
 	Get(ctx context.Context, id string) (*domain.AgentGroup, error)
 	// Create stores a new agent group.

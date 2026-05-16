@@ -42,6 +42,15 @@ func (m *mockAgentGroupRepo) List(ctx context.Context) ([]*domain.AgentGroup, er
 	return groups, nil
 }
 
+// ListPaginated mirrors the SQL-side window. SCALE-002 closure (Sprint 2).
+func (m *mockAgentGroupRepo) ListPaginated(ctx context.Context, limit, offset int) ([]*domain.AgentGroup, int64, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return sliceWindow(all, limit, offset), int64(len(all)), nil
+}
+
 func (m *mockAgentGroupRepo) Get(ctx context.Context, id string) (*domain.AgentGroup, error) {
 	if m.GetErr != nil {
 		return nil, m.GetErr

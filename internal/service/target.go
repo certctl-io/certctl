@@ -89,6 +89,11 @@ func NewTargetService(
 }
 
 // List returns a paginated list of deployment targets.
+//
+// SCALE-002 closure (Sprint 2, 2026-05-16): pagination is pushed into
+// the SQL layer via TargetRepository.ListPaginated. Pre-fix this called
+// targetRepo.List(ctx) and sliced in memory, which marshalled the
+// entire targets table per request — a problem on large-fleet deploys.
 func (s *TargetService) List(ctx context.Context, page, perPage int) ([]*domain.DeploymentTarget, int64, error) {
 	if page < 1 {
 		page = 1
@@ -96,21 +101,8 @@ func (s *TargetService) List(ctx context.Context, page, perPage int) ([]*domain.
 	if perPage < 1 {
 		perPage = 50
 	}
-
-	targets, err := s.targetRepo.List(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list targets: %w", err)
-	}
-	total := int64(len(targets))
-	start := (page - 1) * perPage
-	if start >= int(total) {
-		return nil, total, nil
-	}
-	end := start + perPage
-	if end > int(total) {
-		end = int(total)
-	}
-	return targets[start:end], total, nil
+	offset := (page - 1) * perPage
+	return s.targetRepo.ListPaginated(ctx, perPage, offset)
 }
 
 // Get retrieves a deployment target by ID.
