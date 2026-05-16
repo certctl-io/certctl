@@ -1044,6 +1044,27 @@ func (c *Config) Validate() error {
 	if !validKeygenModes[c.Keygen.Mode] {
 		return fmt.Errorf("invalid keygen mode: %s (must be 'agent' or 'server')", c.Keygen.Mode)
 	}
+	// ARCH-003 closure (Sprint 4, 2026-05-16). README L12 + L82 say
+	// "private keys stay on your infrastructure" and "never touch the
+	// control plane" as blanket claims. CERTCTL_KEYGEN_MODE=server
+	// breaks both claims — the control plane mints the keys directly,
+	// in process memory, and writes them to the renewal job for
+	// delivery. Pre-fix the server printed a boot WARN and started
+	// anyway, so the blanket claim was silently false in any deploy
+	// where the operator flipped the flag without reading their logs.
+	// Mirror the Phase-2 SEC-H3 DemoModeAck pattern: refuse to boot
+	// in server-keygen mode unless the operator has explicitly
+	// acknowledged the demo posture via CERTCTL_DEMO_MODE_ACK=true.
+	// Bypass for tests that legitimately exercise the server-keygen
+	// path: those construct Config directly without going through
+	// Validate(), so this gate doesn't fire there.
+	if c.Keygen.Mode == "server" && !c.Auth.DemoModeAck {
+		return fmt.Errorf(
+			"CERTCTL_KEYGEN_MODE=server is demo-only — the control plane mints private keys in process memory, " +
+				"breaking the 'keys never touch the control plane' production posture. Set " +
+				"CERTCTL_DEMO_MODE_ACK=true + CERTCTL_DEMO_MODE_ACK_TS=$(date +%%s) to acknowledge, " +
+				"OR set CERTCTL_KEYGEN_MODE=agent (the default) for production")
+	}
 
 	// SCEP fail-loud startup gate (H-2, CWE-306).
 	//

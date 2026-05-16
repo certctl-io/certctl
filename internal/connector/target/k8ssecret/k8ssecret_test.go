@@ -644,3 +644,49 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+// =============================================================================
+// SEC-003-K8S closure (Sprint 4, 2026-05-16). The production realK8sClient's
+// CRUD methods are stubs that return "real Kubernetes client not implemented."
+// Pre-fix, New() returned a working-looking Connector wrapping the stub; the
+// operator only saw the failure when a deploy actually fired. Now New()
+// refuses to construct unless CERTCTL_K8SSECRET_PREVIEW_ACK=true is set,
+// surfacing the preview-only state at registration time.
+//
+// The NewWithClient path used by tests in this package stays unchanged —
+// it injects a mock client and doesn't gate on the env var.
+// =============================================================================
+
+func TestNew_RequiresPreviewACK(t *testing.T) {
+	t.Setenv("CERTCTL_K8SSECRET_PREVIEW_ACK", "")
+	cfg := &Config{Namespace: "default", SecretName: "tls-cert"}
+	conn, err := New(cfg, nil)
+	if err == nil {
+		t.Fatalf("New() without ACK returned (conn=%v, err=nil); want preview-ACK rejection", conn)
+	}
+	if conn != nil {
+		t.Errorf("New() returned non-nil conn on rejection: %v", conn)
+	}
+}
+
+func TestNew_AcceptsWithPreviewACK(t *testing.T) {
+	t.Setenv("CERTCTL_K8SSECRET_PREVIEW_ACK", "true")
+	cfg := &Config{Namespace: "default", SecretName: "tls-cert"}
+	conn, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() with ACK = %v; want nil error", err)
+	}
+	if conn == nil {
+		t.Fatalf("New() with ACK returned nil connector")
+	}
+}
+
+func TestNew_RejectsNilConfigBeforeACKCheck(t *testing.T) {
+	// Defense-in-depth: the existing nil-config rejection still
+	// fires regardless of the ACK env, so an operator who flipped
+	// the ACK still can't construct with a missing config.
+	t.Setenv("CERTCTL_K8SSECRET_PREVIEW_ACK", "true")
+	if _, err := New(nil, nil); err == nil {
+		t.Fatalf("New(nil, ...) returned nil; want rejection of nil config")
+	}
+}

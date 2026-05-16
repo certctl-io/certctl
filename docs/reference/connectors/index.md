@@ -1,6 +1,6 @@
 # Connector Development Guide
 
-> Last reviewed: 2026-05-05
+> Last reviewed: 2026-05-16
 >
 > This is the canonical connector reference: interface contracts,
 > registry, deployment primitive, network scanner, cloud discovery.
@@ -41,12 +41,22 @@ Target connectors:
 - [HAProxy](haproxy.md) — combined-PEM deploy + `haproxy -c` validate
 - [IIS](iis.md) — Microsoft IIS, local PowerShell + WinRM modes
 - [Java Keystore](jks.md) — JKS / PKCS#12 via `keytool` with atomic snapshot rollback
-- [Kubernetes Secrets](k8s.md) — k8s.io/tls Secrets atomic update
 - [NGINX](nginx.md) — separate-file deploy + `nginx -t` validate
 - [Postfix / Dovecot](postfix.md) — dual-mode mail-server TLS connector
 - [SSH (agentless)](ssh.md) — agentless deploy over SSH/SFTP for Linux/Unix targets
 - [Traefik](traefik.md) — file-provider zero-reload deploy
 - [Windows Certificate Store](wincertstore.md) — non-IIS Windows services (Exchange, RDP, SQL, ADFS)
+
+### Preview connectors (not in the production-ready set)
+
+SEC-003-K8S closure (Sprint 4, 2026-05-16) moved Kubernetes Secrets
+out of the canonical fourteen-target index because the production
+client-go integration is not yet wired — the connector ships but
+refuses to register without `CERTCTL_K8SSECRET_PREVIEW_ACK=true`
+and the CRUD methods return *"real Kubernetes client not
+implemented"* until the integration lands.
+
+- [Kubernetes Secrets](k8s.md) — **preview** — k8s.io/tls Secrets atomic update. See [`docs/reference/deployment-model.md`](../deployment-model.md) row `k8ssecret` for the bundle-2 V2-blocker scope.
 
 ## Contents
 
@@ -109,7 +119,7 @@ Target connectors:
 Three types of connectors:
 
 1. **Issuer Connector** — Obtains certificates from CAs. 12 built-in: Local CA (self-signed + sub-CA + tree mode; ADCS sub-CA mode is documented separately), ACME v2 (HTTP-01, DNS-01, DNS-PERSIST-01, ARI, EAB, profile selection), step-ca, OpenSSL/Custom CA, Vault PKI, DigiCert CertCentral, Sectigo SCM, Google CAS, AWS ACM Private CA, Entrust Certificate Services, GlobalSign Atlas HVCA, EJBCA (Keyfactor)
-2. **Target Connector** — Deploys certificates to infrastructure. 15 built-in: NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix/Dovecot (dual-mode), IIS (local PowerShell + WinRM proxy), F5 BIG-IP (proxy agent), SSH (agentless), Windows Certificate Store, Java Keystore (JKS / PKCS#12), Kubernetes Secrets, AWS Certificate Manager, Azure Key Vault
+2. **Target Connector** — Deploys certificates to infrastructure. 14 production-ready: NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix/Dovecot (dual-mode), IIS (local PowerShell + WinRM proxy), F5 BIG-IP (proxy agent), SSH (agentless), Windows Certificate Store, Java Keystore (JKS / PKCS#12), AWS Certificate Manager, Azure Key Vault. Plus Kubernetes Secrets shipped as preview — see the *Preview connectors* subsection above for the ACK gate.
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.

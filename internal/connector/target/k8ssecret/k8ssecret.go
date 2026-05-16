@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"time"
 
@@ -81,11 +82,35 @@ var (
 )
 
 // New creates a new Kubernetes Secrets target connector.
-// For now, returns a stub error since we're not pulling in k8s.io dependencies.
-// The real implementation will use k8s.io/client-go to create a real K8s client.
+//
+// SEC-003-K8S closure (Sprint 4, 2026-05-16). The production
+// k8s.io/client-go integration is not yet wired — realK8sClient's
+// CRUD methods at the bottom of this file are stubs that return
+// "real Kubernetes client not implemented." Pre-fix, New() would
+// happily return a working-looking Connector wrapping the stub
+// client; the operator would only see the failure when an actual
+// deploy fired against a registered target. Now New() refuses to
+// construct the connector unless CERTCTL_K8SSECRET_PREVIEW_ACK=true
+// is set, mirroring the SEC-H3 demo-mode ACK pattern. Tests that
+// need a working connector (with the in-memory mock client) call
+// NewWithClient — that path is unchanged.
+//
+// README qualifies the connector as preview at line 67; the
+// runtime guard here closes the gap where an operator could
+// register a k8ssecret target through the GUI / API and silently
+// land a non-functional deployment path in their fleet.
 func New(cfg *Config, logger *slog.Logger) (*Connector, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("Kubernetes config is required")
+	}
+
+	if os.Getenv("CERTCTL_K8SSECRET_PREVIEW_ACK") != "true" {
+		return nil, fmt.Errorf(
+			"k8ssecret connector is preview-only — the production client-go integration ships in a future bundle. " +
+				"To register a k8ssecret target on this build, set CERTCTL_K8SSECRET_PREVIEW_ACK=true on the server " +
+				"AND understand that the connector's CRUD calls will return \"real Kubernetes client not implemented\" " +
+				"until the integration lands. See README.md `Deploy automatically` line and " +
+				"docs/reference/deployment-model.md for the per-target guarantee matrix")
 	}
 
 	// Stub real K8s client — the actual implementation will use k8s.io/client-go
