@@ -201,7 +201,35 @@ check_privileges() {
     fi
 }
 
-# Download agent binary from GitHub Releases
+# Download + verify agent binary from GitHub Releases.
+#
+# Acquisition-audit RED-007 closure (Sprint 7 ACQ, 2026-05-16). Pre-
+# 2026-05-16 the script downloaded the binary with no integrity check
+# — a tampered binary on the release surface, a MITM downgrade
+# (HTTPS already prevents in-flight tampering but a compromised
+# release-asset upload would not surface here), or a misnamed asset
+# would all install silently. The download path now performs two
+# independent verifications:
+#
+#   1. SHA-256 against the published checksums.txt sidecar
+#      (.github/workflows/release.yml aggregate-checksums job).
+#      sha256sum is in coreutils on Linux; macOS ships `shasum`,
+#      which we fall back to.
+#   2. Cosign keyless verify against the project's GitHub OIDC
+#      identity (sigstore/cosign-installer pinned in release.yml).
+#      The signature bundle is the `<binary>.sigstore.json` sibling
+#      asset every release publishes. Cosign verify is OPTIONAL
+#      when the operator doesn't have cosign installed — the
+#      script logs a clear WARN and proceeds; operators in
+#      regulated environments MUST install cosign first
+#      (curl -sSL https://github.com/sigstore/cosign/releases/...)
+#      and re-run.
+#
+# Both verifications happen against the temp file BEFORE
+# install_binary copies it to $INSTALL_DIR. A failed checksum
+# rejects the install. A failed cosign verify also rejects the
+# install. Either rejection rm -f's the temp file and exits 1.
+#
 # IMPORTANT: main() captures this function's stdout via `binary_path=$(download_binary)`,
 # so every status/error message MUST go to stderr (>&2). Only the final
 # `echo "$temp_file"` is allowed on stdout — that's the return value.
@@ -222,16 +250,109 @@ download_binary() {
         exit 1
     fi
 
-    local temp_file
+    local temp_file temp_sigstore temp_checksums
     temp_file=$(mktemp)
+    temp_sigstore=$(mktemp --suffix=.sigstore.json 2>/dev/null || mktemp -t sigstore)
+    temp_checksums=$(mktemp)
 
     if ! curl -sSL -f "$download_url" -o "$temp_file" >&2; then
-        rm -f "$temp_file"
+        rm -f "$temp_file" "$temp_sigstore" "$temp_checksums"
         echo -e "${RED}Error: Failed to download binary from $download_url${NC}" >&2
         echo "Make sure the latest release exists on GitHub with the binary asset for ${OS_TYPE}-${ARCH_TYPE}." >&2
         exit 1
     fi
 
+    # ---- SHA-256 verify against the release-published checksums.txt ----
+    #
+    # Every release publishes a single checksums.txt (sha256sum format) +
+    # a cosign signature on it (checksums.txt.sigstore.json). Downloading
+    # via the same RELEASE_URL keeps the integrity chain rooted at the
+    # GitHub-release surface (not a sibling CDN), so a release-asset
+    # tamper is caught by the very first hash comparison.
+    echo -e "${YELLOW}Downloading checksums.txt for SHA-256 verification...${NC}" >&2
+    if ! curl -sSL -f "${RELEASE_URL}/checksums.txt" -o "$temp_checksums" >&2; then
+        rm -f "$temp_file" "$temp_sigstore" "$temp_checksums"
+        echo -e "${RED}Error: Failed to download checksums.txt from ${RELEASE_URL}.${NC}" >&2
+        echo "The agent binary cannot be installed without integrity verification." >&2
+        exit 1
+    fi
+
+    # Look up the binary's expected hash in the checksums file.
+    local expected_hash
+    expected_hash=$(awk -v name="$binary_name" '$2 == name {print $1; exit}' "$temp_checksums")
+    if [[ -z "$expected_hash" ]]; then
+        rm -f "$temp_file" "$temp_sigstore" "$temp_checksums"
+        echo -e "${RED}Error: checksums.txt has no entry for $binary_name.${NC}" >&2
+        echo "The release surface is inconsistent — refusing to install." >&2
+        exit 1
+    fi
+
+    local actual_hash sha_tool
+    if command -v sha256sum &> /dev/null; then
+        sha_tool="sha256sum"
+        actual_hash=$(sha256sum "$temp_file" | awk '{print $1}')
+    elif command -v shasum &> /dev/null; then
+        sha_tool="shasum -a 256"
+        actual_hash=$(shasum -a 256 "$temp_file" | awk '{print $1}')
+    else
+        rm -f "$temp_file" "$temp_sigstore" "$temp_checksums"
+        echo -e "${RED}Error: neither sha256sum nor shasum is installed.${NC}" >&2
+        echo "Install coreutils (Linux) or shasum (macOS) and re-run." >&2
+        exit 1
+    fi
+
+    if [[ "$actual_hash" != "$expected_hash" ]]; then
+        rm -f "$temp_file" "$temp_sigstore" "$temp_checksums"
+        echo -e "${RED}Error: SHA-256 mismatch for $binary_name (tool: $sha_tool).${NC}" >&2
+        echo "  expected: $expected_hash" >&2
+        echo "  actual:   $actual_hash" >&2
+        echo "The downloaded binary does NOT match the release-published checksum." >&2
+        echo "Refusing to install. Re-run after investigating the release surface." >&2
+        exit 1
+    fi
+    echo -e "${GREEN}SHA-256 verified ($sha_tool):${NC} $actual_hash" >&2
+
+    # ---- Cosign keyless verify (OPTIONAL — warn-mode if absent) ----
+    #
+    # The release publishes <binary>.sigstore.json next to each binary,
+    # signed via sigstore/cosign-installer keyless mode against the
+    # GitHub Actions OIDC identity for the certctl-io/certctl repo
+    # (see .github/workflows/release.yml). Cosign verify with the
+    # certificate-identity-regexp + certificate-oidc-issuer pair
+    # pins the signature to the repo's release workflow — a malicious
+    # asset signed under a different identity fails the verify.
+    if command -v cosign &> /dev/null; then
+        echo -e "${YELLOW}Cosign keyless-verifying binary signature...${NC}" >&2
+        if ! curl -sSL -f "${download_url}.sigstore.json" -o "$temp_sigstore" >&2; then
+            rm -f "$temp_file" "$temp_sigstore" "$temp_checksums"
+            echo -e "${RED}Error: Failed to download cosign signature from ${download_url}.sigstore.json.${NC}" >&2
+            echo "Either the release surface is broken or this binary predates the cosign-signed releases. Refusing to install." >&2
+            exit 1
+        fi
+        if ! COSIGN_EXPERIMENTAL=1 cosign verify-blob \
+                --bundle "$temp_sigstore" \
+                --certificate-identity-regexp "^https://github.com/${GITHUB_REPO}/" \
+                --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+                "$temp_file" >&2; then
+            rm -f "$temp_file" "$temp_sigstore" "$temp_checksums"
+            echo -e "${RED}Error: cosign verify-blob failed for $binary_name.${NC}" >&2
+            echo "The binary is NOT signed by the expected GitHub Actions OIDC identity." >&2
+            echo "Refusing to install. This is the load-bearing supply-chain check." >&2
+            exit 1
+        fi
+        echo -e "${GREEN}Cosign signature verified${NC} (identity matches ${GITHUB_REPO} release workflow)" >&2
+    else
+        echo -e "${YELLOW}WARNING:${NC} cosign is not installed — SKIPPING signature verification." >&2
+        echo "  SHA-256 verification above is still in force, but the cosign signature" >&2
+        echo "  ties the binary to the certctl-io/certctl release workflow's OIDC" >&2
+        echo "  identity — the load-bearing supply-chain check. Operators in regulated" >&2
+        echo "  environments MUST install cosign and re-run:" >&2
+        echo "    curl -sSL https://github.com/sigstore/cosign/releases/latest/download/cosign-${OS_TYPE}-${ARCH_TYPE} -o /usr/local/bin/cosign" >&2
+        echo "    chmod +x /usr/local/bin/cosign" >&2
+        echo "  Continuing with SHA-256 verification only." >&2
+    fi
+
+    rm -f "$temp_sigstore" "$temp_checksums"
     chmod +x "$temp_file"
     echo "$temp_file"
 }
