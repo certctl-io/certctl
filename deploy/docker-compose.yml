@@ -62,7 +62,13 @@ services:
   # handshake. ECDSA-P256 with SHA-256 is universally supported. See
   # docs/tls.md Pattern 1.
   certctl-tls-init:
-    image: alpine/openssl:latest
+    # DEPL-002 closure (Sprint 3, 2026-05-16): digest-pin so the
+    # production-shaped compose has the same supply-chain posture as
+    # the certctl Dockerfiles (which CI guards via digest-validity.sh).
+    # The :latest tag floats; the digest is captured at the time
+    # this comment was written. Bump after running the digest-
+    # validity guard to confirm the new digest is still pullable.
+    image: alpine/openssl:latest@sha256:41036db23542ed4cc09bc278d8a7e23b3da01690abb4b0e353b1bb87d70520ed
     container_name: certctl-tls-init
     restart: "no"
     entrypoint: /bin/sh
@@ -123,7 +129,12 @@ services:
   # `unhealthy` flap to cascade into certctl-server's `service_healthy`
   # depends_on, blocking the whole stack.
   postgres:
-    image: postgres:16-alpine
+    # DEPL-002 closure (Sprint 3, 2026-05-16): digest-pin matching the
+    # alpine/openssl pin above. The `16-alpine` tag is the stable
+    # major-version stream; the digest snapshots today's image so a
+    # silent upstream rebuild can't slip into a production deploy
+    # mid-rollout. Bump alongside dependency reviews.
+    image: postgres:16-alpine@sha256:890480b08124ce7f79960a9bb16fe39729aa302bd384bfd7c408fee6c8f7adb7
     container_name: certctl-postgres
     environment:
       POSTGRES_DB: certctl
