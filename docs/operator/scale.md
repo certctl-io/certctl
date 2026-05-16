@@ -1,6 +1,6 @@
 # Operator scale guide
 
-> Last reviewed: 2026-05-14
+> Last reviewed: 2026-05-16
 
 Use this when:
 - You're sizing a new certctl deployment for a target fleet count.
@@ -160,29 +160,23 @@ the RFC 7807 `application/problem+json` shape with the
 returned plain-text 429 or a different problem type would surface as
 `(rate_limited_count - shape_ok_count) > 0` in the summary.
 
-### Measured baseline — TBD pending canonical-hardware capture
+### Measured baseline
 
-The Phase 8 scenarios shipped 2026-05-14. Baseline capture on a
-canonical `ubuntu-latest` GitHub runner is the next operational step;
-until then, the table below holds TBD placeholders. **Do NOT publish
-sandbox-captured numbers here** — the same anti-pattern the original
-loadtest README guards against (sandbox-aggregate placeholder vs
-canonical hardware) applies to Phase 8.
+TEST-005 closure (Sprint 5, 2026-05-16) moved the baseline table out
+of this file into its own canonical record:
+[`docs/operator/scale-baseline-2026-Q2.md`](scale-baseline-2026-Q2.md).
+That doc owns the capture procedure, the methodology, and the
+per-scenario rows; this page links to it as the authoritative
+source.
 
-| Scenario | p50 | p95 | p99 | Error rate | Date measured | Commit |
-|---|---|---|---|---|---|---|
-| **bulk_renewal** | TBD | TBD | TBD | TBD | — | — |
-| **acme_burst** directory | TBD | TBD | TBD | TBD | — | — |
-| **acme_burst** new-nonce | TBD | TBD | TBD | TBD | — | — |
-| **acme_burst** renewal-info | TBD | TBD | TBD | TBD | — | — |
-| **agent_storm** | TBD | TBD | TBD | TBD | — | — |
+The split exists because the baseline table is mutable on every
+loadtest workflow_dispatch run, while this page (the operator-facing
+scale posture doc) changes only when the underlying scenarios or
+thresholds change. Keeping them in separate files avoids
+review-noise on per-capture commits.
 
-Capture procedure: trigger `loadtest.yml` from the Actions tab against
-the current `master` SHA; wait for the `k6-scale` matrix jobs to
-complete; download the per-scenario summary artifacts; copy p50/p95/
-p99 from `summary-<scenario>.json` into the table; commit the
-captured numbers alongside the date + SHA. Replace this paragraph
-with the captured-on row when the first canonical run lands.
+Long-term k6 NDJSON artifacts beyond GHA's 90-day retention live at
+[`deploy/test/loadtest-artifacts/`](../../deploy/test/loadtest-artifacts/).
 
 ### How to run the scale tier locally
 
