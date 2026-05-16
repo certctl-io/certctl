@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,6 +25,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/certctl-io/certctl/internal/scheduler"
 )
 
 // AgentConfig represents the agent-side configuration.
@@ -231,15 +234,49 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.logger.Warn("failed to enforce key directory permissions", "path", a.config.KeyDir, "error", err)
 	}
 
-	// Create ticker channels for heartbeat, polling, and discovery
-	heartbeatTicker := time.NewTicker(a.heartbeatInterval)
+	// SCALE-006 closure (Sprint 2, 2026-05-16). Pre-fix the agent
+	// started its heartbeat + poll loops on fixed time.NewTicker
+	// cadence with an unjittered immediate first invocation. Mass
+	// restarts (rolling K8s deploy, control-plane reboot, scheduled
+	// fleet bounce) produced a thundering herd — 5K agents booting
+	// in a 10-second window all hit /heartbeat in lockstep, then
+	// /poll, every interval forever afterward.
+	//
+	// Fix: (1) sleep a random startup-jitter ∈ [0, interval) before
+	// the first heartbeat + first poll to spread the initial cohort,
+	// and (2) use scheduler.JitteredTicker (±10% per-tick envelope)
+	// for the recurring ticks so the cohort stays spread across
+	// every tick boundary. Both legs use the existing in-tree
+	// JitteredTicker primitive (internal/scheduler/jitter.go) —
+	// pattern already exercised by every scheduler.go loop on the
+	// server side.
+	heartbeatTicker := scheduler.NewJitteredTicker(a.heartbeatInterval, scheduler.DefaultSchedulerJitter)
 	defer heartbeatTicker.Stop()
-
-	pollTicker := time.NewTicker(a.pollInterval)
+	pollTicker := scheduler.NewJitteredTicker(a.pollInterval, scheduler.DefaultSchedulerJitter)
 	defer pollTicker.Stop()
 
-	// Run initial heartbeat and poll
+	// Startup jitter — run-first delay drawn fresh per-agent so a
+	// 5K-agent rolling-restart spreads out across (max interval).
+	// Bounded by ctx so a sigint-during-startup exits cleanly rather
+	// than hanging on the Sleep. Heartbeat and poll are drawn
+	// independently so a single random seed doesn't create a
+	// secondary correlation pattern.
+	hbJitter := time.Duration(rand.Int64N(int64(a.heartbeatInterval)))
+	pollJitter := time.Duration(rand.Int64N(int64(a.pollInterval)))
+	a.logger.Info("startup jitter applied",
+		"heartbeat_jitter", hbJitter.String(),
+		"poll_jitter", pollJitter.String())
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(hbJitter):
+	}
 	a.sendHeartbeat(ctx)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(pollJitter):
+	}
 	a.pollForWork(ctx)
 
 	// Discovery: run initial scan if directories configured, then on interval
