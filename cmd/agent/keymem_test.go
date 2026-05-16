@@ -716,3 +716,113 @@ func TestKeymem_AgentMainFlowSmoke(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// SEC-002 closure (Sprint 1, 2026-05-16) — safeAgentKeyPath path-traversal
+// regression coverage.
+//
+// Pre-fix the agent built the on-disk key path via:
+//
+//	keyPath := filepath.Join(a.config.KeyDir, job.CertificateID+".key")
+//
+// migrations/000001_initial_schema.up.sql declares
+// managed_certificates.id as TEXT PRIMARY KEY with no shape constraint, so
+// a crafted certificate_id from a compromised control plane (or a poisoned
+// DB row) could land outside KeyDir. The fix:
+//
+//   - validateAgentCertID rejects shape violations up-front
+//   - safeAgentKeyPath additionally asserts the joined path is contained
+//     within KeyDir via filepath.Rel; even a future refactor that drops
+//     the shape regex would still fail closed on escape.
+//
+// These tests pin both legs against the four vectors called out in the
+// audit (../../etc/passwd, /absolute/path, NUL byte, Windows separators).
+// =============================================================================
+
+func TestValidateAgentCertID_AcceptsCanonicalShapes(t *testing.T) {
+	for _, id := range []string{
+		"mc-cdn-edge",
+		"mc-cdn-edge-2026.q1",
+		"cert-1",
+		"abc123",
+		"MC-UPPER",
+	} {
+		t.Run(id, func(t *testing.T) {
+			if err := validateAgentCertID(id); err != nil {
+				t.Errorf("validateAgentCertID(%q): unexpected error %v", id, err)
+			}
+		})
+	}
+}
+
+func TestValidateAgentCertID_RejectsTraversalVectors(t *testing.T) {
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"empty", ""},
+		{"parent_token", ".."},
+		{"current_token", "."},
+		{"posix_traversal", "../../etc/passwd"},
+		{"absolute_posix", "/absolute/path"},
+		{"windows_traversal", `..\..\evil`},
+		{"windows_separator", `bad\path`},
+		{"nul_byte", "abc\x00def"},
+		{"newline", "abc\ndef"},
+		{"space", "id with spaces"},
+		{"overlong", strings.Repeat("a", 129)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateAgentCertID(tc.id); err == nil {
+				t.Errorf("id=%q: expected rejection, got nil", tc.id)
+			}
+		})
+	}
+}
+
+func TestSafeAgentKeyPath_HappyPath_ProducesContainedPath(t *testing.T) {
+	keyDir := t.TempDir()
+	got, err := safeAgentKeyPath(keyDir, "mc-good")
+	if err != nil {
+		t.Fatalf("safeAgentKeyPath: %v", err)
+	}
+	want := filepath.Join(keyDir, "mc-good.key")
+	// filepath.Clean normalisation may strip a trailing separator, etc.;
+	// compare canonical forms.
+	if filepath.Clean(got) != filepath.Clean(want) {
+		t.Errorf("safeAgentKeyPath = %q; want %q", got, want)
+	}
+}
+
+func TestSafeAgentKeyPath_RejectsTraversalVectors(t *testing.T) {
+	keyDir := t.TempDir()
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"posix_traversal", "../../etc/passwd"},
+		{"absolute_posix", "/etc/passwd"},
+		{"parent_token", ".."},
+		{"current_token", "."},
+		{"windows_traversal", `..\..\evil`},
+		{"windows_separator", `bad\path`},
+		{"nul_byte", "abc\x00def"},
+		{"empty", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := safeAgentKeyPath(keyDir, tc.id)
+			if err == nil {
+				t.Errorf("id=%q: expected rejection, got nil", tc.id)
+			}
+		})
+	}
+}
+
+func TestSafeAgentKeyPath_RejectsEmptyKeyDir(t *testing.T) {
+	_, err := safeAgentKeyPath("", "mc-good")
+	if err == nil {
+		t.Errorf("empty keyDir: expected rejection, got nil")
+	}
+}

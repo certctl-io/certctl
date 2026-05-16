@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/certctl-io/certctl/internal/connector/target"
@@ -105,8 +104,24 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 	// Split PEM into cert and chain (separated by double newline between PEM blocks)
 	certOnly, chainPEM := splitPEMChain(certPEM)
 
-	// Check for locally-stored private key (agent keygen mode)
-	keyPath := filepath.Join(a.config.KeyDir, job.CertificateID+".key")
+	// Check for locally-stored private key (agent keygen mode).
+	//
+	// SEC-002 closure (Sprint 1, 2026-05-16): safeAgentKeyPath validates
+	// the certificate_id shape AND asserts the joined path is contained
+	// within a.config.KeyDir. A crafted certificate_id (path traversal,
+	// absolute path, NUL byte, Windows separators) fails closed before
+	// any disk I/O. See cmd/agent/keymem.go for the helper.
+	keyPath, kerr := safeAgentKeyPath(a.config.KeyDir, job.CertificateID)
+	if kerr != nil {
+		a.logger.Error("agent key path validation failed for deployment",
+			"job_id", job.ID,
+			"certificate_id", job.CertificateID,
+			"error", kerr)
+		if reportErr := a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key path validation failed: %v", kerr)); reportErr != nil {
+			a.logger.Error("failed to report job status to server", "job_id", job.ID, "error", reportErr)
+		}
+		return
+	}
 	var keyPEM string
 	keyData, err := os.ReadFile(keyPath)
 	if err != nil {

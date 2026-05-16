@@ -151,7 +151,20 @@ func (a *Agent) executeCSRJob(ctx context.Context, job JobItem) {
 	// before any write touches disk. Also defer-clear the PEM buffer for
 	// the same reason — the encoded key isn't sensitive in transit (it's
 	// going to disk) but lingers on the heap if we don't.
-	keyPath := filepath.Join(a.config.KeyDir, job.CertificateID+".key")
+	//
+	// SEC-002 closure (Sprint 1, 2026-05-16): safeAgentKeyPath validates
+	// the certificate_id shape AND asserts the joined path is contained
+	// within a.config.KeyDir. A crafted certificate_id like
+	// "../../etc/passwd" or "/abs/path" now fails closed before any
+	// disk I/O. See cmd/agent/keymem.go for the helper.
+	keyPath, kerr := safeAgentKeyPath(a.config.KeyDir, job.CertificateID)
+	if kerr != nil {
+		a.logger.Error("agent key path validation failed", "job_id", job.ID, "certificate_id", job.CertificateID, "error", kerr)
+		if reportErr := a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key path validation failed: %v", kerr)); reportErr != nil {
+			a.logger.Error("failed to report job status to server", "job_id", job.ID, "status", "Failed", "error", reportErr)
+		}
+		return
+	}
 	if err := ensureAgentKeyDirSecure(filepath.Dir(keyPath)); err != nil {
 		a.logger.Error("agent key dir hardening failed", "job_id", job.ID, "error", err)
 		if reportErr := a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key dir hardening failed: %v", err)); reportErr != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // CertificateService provides business logic for certificate management.
@@ -162,6 +163,15 @@ func (s *CertificateService) Create(ctx context.Context, cert *domain.ManagedCer
 	// Validate certificate structure
 	if cert.ID == "" || cert.CommonName == "" || cert.IssuerID == "" {
 		return fmt.Errorf("invalid certificate: missing required fields")
+	}
+	// SEC-002 closure (Sprint 1, 2026-05-16): pin the certificate_id
+	// shape at the server boundary. The agent derives an on-disk key
+	// path from this ID via filepath.Join; without this gate a
+	// crafted ID like "../../etc/passwd" or "/absolute/path" would
+	// drive arbitrary file write/read on the agent host. Companion
+	// containment check lives in cmd/agent/keymem.go (safeAgentKeyPath).
+	if err := validation.ValidateCertificateID(cert.ID); err != nil {
+		return fmt.Errorf("invalid certificate id: %w", err)
 	}
 
 	// Run policy validation
