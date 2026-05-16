@@ -613,6 +613,12 @@ func Load() (*Config, error) {
 			SMTPPassword:        getEnv("CERTCTL_SMTP_PASSWORD", ""),
 			SMTPFromAddress:     getEnv("CERTCTL_SMTP_FROM_ADDRESS", ""),
 			SMTPUseTLS:          getEnvBool("CERTCTL_SMTP_USE_TLS", true),
+			// Acquisition-audit DOC-001 closure (Sprint 7 ACQ, 2026-05-16).
+			// Wire the previously-orphan webhook notifier
+			// (internal/connector/notifier/webhook/) into the boot
+			// path. Empty WebhookURL = notifier disabled.
+			WebhookURL:    getEnv("CERTCTL_WEBHOOK_URL", ""),
+			WebhookSecret: getEnv("CERTCTL_WEBHOOK_SECRET", ""),
 		},
 		NetworkScan: NetworkScanConfig{
 			Enabled:      getEnvBool("CERTCTL_NETWORK_SCAN_ENABLED", false),

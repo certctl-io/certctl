@@ -38,6 +38,7 @@ import (
 	notifypagerduty "github.com/certctl-io/certctl/internal/connector/notifier/pagerduty"
 	notifyslack "github.com/certctl-io/certctl/internal/connector/notifier/slack"
 	notifyteams "github.com/certctl-io/certctl/internal/connector/notifier/teams"
+	notifywebhook "github.com/certctl-io/certctl/internal/connector/notifier/webhook"
 	"github.com/certctl-io/certctl/internal/crypto/signer"
 	"github.com/certctl-io/certctl/internal/domain"
 	authdomainAlias "github.com/certctl-io/certctl/internal/domain/auth"
@@ -740,6 +741,31 @@ func main() {
 		})
 		notifierRegistry["OpsGenie"] = ogNotifier
 		logger.Info("OpsGenie notifier enabled")
+	}
+
+	// Acquisition-audit DOC-001 closure (Sprint 7 ACQ, 2026-05-16).
+	// Generic webhook notifier. The webhook impl shipped to
+	// internal/connector/notifier/webhook/ months ago with full
+	// SafeHTTPDialContext SSRF guard + HMAC-SHA256 signing + tests but
+	// was never wired here — the README's "6 notifiers" claim was off
+	// by one. NotifierAdapter bridges the rich notifier.Connector
+	// interface (SendEvent / SendAlert / ValidateConfig) to the
+	// service.Notifier (Send + Channel) shape used by the notification
+	// service. Empty CERTCTL_WEBHOOK_URL keeps the notifier disabled
+	// (matches the env-var-gated pattern of the other five). The
+	// signing secret is operator-acknowledged optional — see
+	// internal/config/notifiers.go::NotifierConfig.WebhookSecret.
+	if cfg.Notifiers.WebhookURL != "" {
+		webhookConnector := notifywebhook.New(&notifywebhook.Config{
+			URL:    cfg.Notifiers.WebhookURL,
+			Secret: cfg.Notifiers.WebhookSecret,
+		}, logger)
+		notifierRegistry["Webhook"] = notifywebhook.NewNotifierAdapter(webhookConnector)
+		signedHint := "unsigned"
+		if cfg.Notifiers.WebhookSecret != "" {
+			signedHint = "HMAC-SHA256 signed"
+		}
+		logger.Info("Webhook notifier enabled", "signing", signedHint)
 	}
 
 	// Wire email notifier if SMTP is configured
