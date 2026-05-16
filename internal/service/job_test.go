@@ -982,18 +982,27 @@ func TestProcessPendingJobs_RespectsClaimLimit(t *testing.T) {
 		t.Errorf("LastClaimLimit = %d; want 3 (SetClaimLimit must propagate)", jobRepo.LastClaimLimit)
 	}
 
-	// Count how many transitioned from Pending → Running via the mock's
-	// atomic-claim behaviour.
+	// The mock's ClaimPendingJobs flips claimed rows Pending → Running.
+	// processJob then runs and (since these rows reference cert IDs the
+	// mock cert-repo doesn't know about) transitions them to Failed.
+	// The load-bearing invariant for SCALE-001 is: the claim cap STOPPED
+	// at 3, so exactly 3 rows left the Pending pool and the remaining 7
+	// stayed Pending for the next tick.
 	jobRepo.mu.Lock()
 	defer jobRepo.mu.Unlock()
-	var running int
+	var stillPending, claimed int
 	for _, j := range jobRepo.Jobs {
-		if j.Status == domain.JobStatusRunning {
-			running++
+		if j.Status == domain.JobStatusPending {
+			stillPending++
+		} else {
+			claimed++
 		}
 	}
-	if running != 3 {
-		t.Errorf("running-job count = %d; want 3 (claim cap should have stopped after 3)", running)
+	if claimed != 3 {
+		t.Errorf("claimed (non-Pending) count = %d; want 3 (claim cap should have stopped after 3)", claimed)
+	}
+	if stillPending != 7 {
+		t.Errorf("still-Pending count = %d; want 7 (the cap should have left the rest untouched)", stillPending)
 	}
 }
 
