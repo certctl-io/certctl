@@ -117,7 +117,12 @@ function isStateChangingMethod(method?: string): boolean {
   }
 }
 
-async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+// fetchJSON is exported (ARCH-001-A closure, Sprint 5, 2026-05-16)
+// so the orval-generated mutator at src/api/mutator.ts can delegate to
+// the same auth/CSRF/401-event semantics without duplicating them. The
+// hand-written client.ts entry points (getCertificates, etc.) continue
+// to call this internally during the per-consumer migration window.
+export async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   // Bundle 2 Phase 8 — credentials:'include' lets the certctl_session
   // cookie ride along on every request. Bearer-mode deployments work
   // unchanged (the cookie just isn't there). Auto-attach X-CSRF-Token

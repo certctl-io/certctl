@@ -31,11 +31,18 @@ set -e
 GENERATED_DIR="web/src/api/generated"
 
 if [ ! -d "$GENERATED_DIR" ]; then
-  echo "openapi-codegen-drift: skipped — $GENERATED_DIR does not exist yet."
-  echo "  This is expected during Phase 5 scaffolding. Once the operator"
-  echo "  runs 'cd web && npm install && npm run generate' for the first"
-  echo "  time, the directory lands and this guard activates."
-  exit 0
+  # ARCH-001-A closure (Sprint 5, 2026-05-16). Pre-fix the guard
+  # tolerated a missing generated/ tree as "Phase 5 scaffolding."
+  # Phase 5 scaffolded; ARCH-001-A landed the first generation and
+  # committed the tree. From this point on, a missing generated/
+  # directory means a contributor deleted it (intentionally or not)
+  # — the guard fails closed so CI catches the deletion.
+  echo "::error::openapi-codegen-drift: $GENERATED_DIR does not exist. ARCH-001-A committed the initial generated tree; a deletion has happened since."
+  echo "  Restore via:"
+  echo "      cd web && npm ci && npm run generate"
+  echo "  Then commit the result. Do NOT delete generated/ — the codegen-drift"
+  echo "  guard depends on its presence."
+  exit 1
 fi
 
 # Tolerate the case where orval isn't installed in the local

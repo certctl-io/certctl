@@ -11,7 +11,11 @@ info:
 
     Paginated list endpoints accept `page` (default 1) and `per_page` (default 50, max 500)
     query parameters and return a standard envelope with `data`, `total`, `page`, and `per_page`.
-  version: 2.0.0
+  # ARCH-001-A closure (Sprint 5, 2026-05-16): info.version MUST track
+  # the latest `v*` git tag. The openapi-version-tag-parity.sh CI guard
+  # asserts this on every CI run. Bump in lockstep with the
+  # `git tag -a v* ...` command at release time.
+  version: 2.1.7
   license:
     name: BSL 1.1
     url: https://github.com/certctl-io/certctl/blob/master/LICENSE
@@ -75,6 +79,7 @@ tags:
   - name: EST
     description: Enrollment over Secure Transport (RFC 7030)
   - name: SCEP
+    description: Simple Certificate Enrollment Protocol (RFC 8894)
   - name: Sessions
     description: |
       Server-side session management. Phase 13 Sprint 13.4 (ARCH-H1
@@ -86,7 +91,6 @@ tags:
       Phase 13 Sprint 13.4 — authored against the Phase 9 Sprint 11
       sibling-file handlers at internal/api/handler/auth_session_oidc_crud.go +
       the JWKS-status surface at internal/api/handler/auth_users.go.
-    description: Simple Certificate Enrollment Protocol (RFC 8894)
 
 paths:
   # ─── Health & Auth ───────────────────────────────────────────────────
@@ -5930,6 +5934,16 @@ components:
           type: string
         request_id:
           type: string
+
+    # ARCH-001-A closure (Sprint 5, 2026-05-16). Three operation
+    # responses (search `#/components/schemas/Error` in this file)
+    # reference a schema named "Error" — but only "ErrorResponse" was
+    # defined, so the orval codegen failed with
+    # MissingPointerError. Alias Error → ErrorResponse so the spec
+    # parses cleanly and the three offenders keep their stable
+    # response shape.
+    Error:
+      $ref: "#/components/schemas/ErrorResponse"
 
     StatusResponse:
       type: object
