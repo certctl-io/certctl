@@ -58,11 +58,31 @@ type TestDiscoveryResult struct {
 func (s *Service) TestDiscovery(ctx context.Context, issuerURL string) (*TestDiscoveryResult, error) {
 	res := &TestDiscoveryResult{}
 
+	// SEC-001 closure (Sprint 1, 2026-05-16): refuse reserved-address
+	// issuers up-front so operators see a clear policy error instead
+	// of the lower-level dial-rejection wrap from SafeHTTPDialContext.
+	// The dial-time guard remains the authoritative DNS-rebinding-safe
+	// defense; this is the early-fail UX rail. Routed through the
+	// validateIssuerSSRF package-level seam so tests using
+	// httptest.NewServer can swap it for a no-op (see setup_test.go).
+	if vErr := validateIssuerSSRF(issuerURL); vErr != nil {
+		res.Errors = append(res.Errors, fmt.Sprintf("issuer_url failed SSRF policy: %v", vErr))
+		return res, nil
+	}
+
 	// Step 1 — discovery. gooidc.NewProvider fetches
 	// `<issuer>/.well-known/openid-configuration` and runs the iss
 	// match check internally; on failure it returns a fmt-style
 	// wrapped error.
-	provider, err := gooidc.NewProvider(ctx, issuerURL)
+	//
+	// SEC-001 closure (Sprint 1, 2026-05-16): the bare `ctx` is wrapped
+	// in SafeOIDCContext so the discovery fetch + the resulting
+	// Verifier's internal JWKS fetch both run through a transport
+	// whose DialContext is validation.SafeHTTPDialContext. Pre-fix the
+	// default HTTP client could be aimed at loopback / RFC 1918 /
+	// link-local / cloud-metadata addresses via the admin-supplied
+	// issuer URL. See safehttp.go for the full closure note.
+	provider, err := gooidc.NewProvider(SafeOIDCContext(ctx), issuerURL)
 	if err != nil {
 		res.Errors = append(res.Errors, fmt.Sprintf("discovery fetch failed: %v", err))
 		return res, nil // Non-fatal at this layer; the response carries the per-leg failure.

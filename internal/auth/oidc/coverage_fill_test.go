@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // Coverage fill — v2.1.0 release gate Phase 3.
@@ -56,6 +58,54 @@ func TestJWKSStatus_ReturnsSnapshot_AfterAuthRequestPopulatesEntry(t *testing.T)
 	// JWKS cache). Test the shape rather than the kids.
 	if snap.CurrentKIDs == nil {
 		t.Errorf("CurrentKIDs must be non-nil (empty slice OK)")
+	}
+}
+
+// TestTestDiscovery_RejectsSSRFIssuer_AtEarlyFailRail pins the
+// SEC-001 closure (Sprint 1, 2026-05-16): TestDiscovery refuses
+// reserved-address issuers up-front via validateIssuerSSRF, surfacing
+// a clean "issuer_url failed SSRF policy" error in the result's
+// Errors slice without ever hitting the dial path. The package-wide
+// setup_test.go init() swaps validateIssuerSSRF to a no-op so the
+// other tests can use httptest loopback servers; this test temporarily
+// restores the production gate (validation.ValidateSafeURL) and
+// asserts the rejection fires.
+func TestTestDiscovery_RejectsSSRFIssuer_AtEarlyFailRail(t *testing.T) {
+	prev := validateIssuerSSRF
+	validateIssuerSSRF = validation.ValidateSafeURL
+	defer func() { validateIssuerSSRF = prev }()
+
+	svc := newServiceForUnitTest(t)
+	cases := []struct {
+		name   string
+		issuer string
+	}{
+		{"loopback_v4", "https://127.0.0.1/realms/certctl"},
+		{"loopback_v6", "https://[::1]/realms/certctl"},
+		{"cloud_metadata", "https://169.254.169.254/latest/meta-data/"},
+		{"link_local_v4", "https://169.254.10.5/realms/certctl"},
+		{"link_local_v6", "https://[fe80::1]/realms/certctl"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := svc.TestDiscovery(context.Background(), tc.issuer)
+			if err != nil {
+				t.Fatalf("TestDiscovery (non-fatal): %v", err)
+			}
+			if res == nil {
+				t.Fatalf("expected non-nil result")
+			}
+			if res.DiscoverySucceeded {
+				t.Errorf("expected DiscoverySucceeded=false for SSRF issuer; got true")
+			}
+			if len(res.Errors) == 0 {
+				t.Fatalf("expected non-empty Errors slice")
+			}
+			joined := strings.Join(res.Errors, "|")
+			if !strings.Contains(joined, "SSRF policy") {
+				t.Errorf("expected 'SSRF policy' in errors; got %v", res.Errors)
+			}
+		})
 	}
 }
 

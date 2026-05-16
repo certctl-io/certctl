@@ -29,4 +29,14 @@ func init() {
 		Timeout:   10 * time.Second,
 		Transport: http.DefaultTransport,
 	}
+	// SEC-001 closure companion: same SSRF-bypass for the discovery
+	// fetch's http.Client + the static issuer-URL gate. Tests using
+	// httptest.NewServer get a loopback URL; the production
+	// SafeHTTPDialContext + validateIssuerSSRF would reject these.
+	// Production code never reassigns either var.
+	oidcDiscoveryClient = &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: http.DefaultTransport,
+	}
+	validateIssuerSSRF = func(string) error { return nil }
 }

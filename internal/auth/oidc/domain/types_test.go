@@ -82,6 +82,41 @@ func TestOIDCProvider_Validate_RejectsNonHTTPSIssuer(t *testing.T) {
 	}
 }
 
+// SEC-001 closure (Sprint 1, 2026-05-16). The IssuerURL Validate gate
+// now refuses reserved-address issuers (loopback, RFC 1918,
+// link-local, IPv6 loopback, IPv6 link-local, cloud metadata) so a
+// row claiming https://127.0.0.1/... or https://169.254.169.254/...
+// never makes it to the persistence layer or the runtime discovery
+// dial. Authoritative dial-time rejection lives in
+// internal/validation.SafeHTTPDialContext (DNS-rebinding-safe); this
+// test pins the static URL gate that surfaces the policy violation
+// with a clean error before any network I/O.
+func TestOIDCProvider_Validate_RejectsSSRFIssuer(t *testing.T) {
+	cases := []struct {
+		name   string
+		issuer string
+	}{
+		{"loopback_v4", "https://127.0.0.1/realms/certctl"},
+		{"loopback_v6", "https://[::1]/realms/certctl"},
+		{"cloud_metadata", "https://169.254.169.254/latest/meta-data/"},
+		{"link_local_v4", "https://169.254.10.5/realms/certctl"},
+		{"link_local_v6", "https://[fe80::1]/realms/certctl"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validProvider()
+			p.IssuerURL = tc.issuer
+			err := p.Validate()
+			if err == nil {
+				t.Fatalf("issuer=%q: Validate returned nil; want SSRF policy rejection", tc.issuer)
+			}
+			if !strings.Contains(err.Error(), "SSRF policy") {
+				t.Errorf("issuer=%q: err=%v; want error mentioning SSRF policy", tc.issuer, err)
+			}
+		})
+	}
+}
+
 func TestOIDCProvider_Validate_RejectsEmptyClientID(t *testing.T) {
 	p := validProvider()
 	p.ClientID = ""

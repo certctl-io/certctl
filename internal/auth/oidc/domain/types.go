@@ -22,6 +22,7 @@ import (
 	"time"
 
 	authdomain "github.com/certctl-io/certctl/internal/domain/auth"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // OIDCProvider describes a configured OpenID Connect identity provider
@@ -159,6 +160,16 @@ func (p *OIDCProvider) Validate() error {
 	}
 	if _, err := url.Parse(p.IssuerURL); err != nil {
 		return fmt.Errorf("oidc: issuer_url is not a valid URL: %w", err)
+	}
+	// SEC-001 closure (Sprint 1, 2026-05-16): reject reserved-address
+	// issuers (loopback / RFC 1918 / link-local / cloud metadata) at
+	// provider-creation time. Defense-in-depth alongside
+	// oidc.SafeOIDCContext, which is the authoritative dial-time
+	// re-resolution + reject. The static URL check stops the obvious
+	// case ("https://169.254.169.254/...") before the row is persisted
+	// or the dry-run validator runs.
+	if err := validation.ValidateSafeURL(p.IssuerURL); err != nil {
+		return fmt.Errorf("oidc: issuer_url failed SSRF policy: %w", err)
 	}
 	if strings.TrimSpace(p.ClientID) == "" {
 		return ErrOIDCEmptyClientID

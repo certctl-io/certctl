@@ -1063,7 +1063,14 @@ func (s *Service) getOrLoad(ctx context.Context, providerID string) (*providerEn
 	}
 
 	// Fetch + cache the discovery doc + JWKS via go-oidc.
-	provider, err := gooidc.NewProvider(ctx, cfgRow.IssuerURL)
+	//
+	// SEC-001 closure (Sprint 1, 2026-05-16): the bare `ctx` is wrapped
+	// in SafeOIDCContext so the discovery fetch + every subsequent
+	// Verifier-issued JWKS fetch run through validation.SafeHTTPDialContext.
+	// Pre-fix this path used http.DefaultClient and could be aimed at
+	// loopback / RFC 1918 / link-local / cloud-metadata addresses via the
+	// admin-supplied issuer URL. See safehttp.go for the full closure note.
+	provider, err := gooidc.NewProvider(SafeOIDCContext(ctx), cfgRow.IssuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("oidc: discovery fetch failed for %s: %w", providerID, err)
 	}
