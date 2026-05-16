@@ -25,6 +25,7 @@ func TestSecurityHeaders_DefaultsAllPresent(t *testing.T) {
 		"X-Content-Type-Options",
 		"Referrer-Policy",
 		"Content-Security-Policy",
+		"Permissions-Policy",
 	} {
 		if got := rec.Header().Get(h); got == "" {
 			t.Errorf("expected header %q to be set, got empty", h)
@@ -100,5 +101,53 @@ func TestSecurityHeaders_AppliedOnErrorResponses(t *testing.T) {
 	}
 	if got := rec.Header().Get("Content-Security-Policy"); got == "" {
 		t.Errorf("CSP missing on 401 response")
+	}
+}
+
+// TestSecurityHeaders_PermissionsPolicyDefault pins the literal value
+// of the default Permissions-Policy header. Acquisition-audit SEC-008
+// closure (Sprint 2 ACQ, 2026-05-16). The deny-all baseline removes
+// camera/microphone/geolocation/accelerometer/payment/USB/interest-cohort
+// attack + fingerprint surfaces — none of which the certctl control
+// plane needs. A regression here (e.g. someone widening to allow
+// camera=*) would surface as a failing test.
+func TestSecurityHeaders_PermissionsPolicyDefault(t *testing.T) {
+	mw := SecurityHeaders(SecurityHeadersDefaults())
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	got := rec.Header().Get("Permissions-Policy")
+	if got == "" {
+		t.Fatal("Permissions-Policy missing from default response")
+	}
+	want := "accelerometer=(), camera=(), geolocation=(), microphone=(), payment=(), usb=(), interest-cohort=()"
+	if got != want {
+		t.Errorf("Permissions-Policy default = %q; want %q", got, want)
+	}
+}
+
+// TestSecurityHeaders_PermissionsPolicyOverrideToEmptySuppresses pins
+// the operator escape hatch: setting Cfg.PermissionsPolicy = "" makes
+// the middleware omit the header entirely (per the per-field empty-
+// string suppression contract), without affecting the other defaults.
+// Acquisition-audit SEC-008 closure (Sprint 2 ACQ, 2026-05-16).
+func TestSecurityHeaders_PermissionsPolicyOverrideToEmptySuppresses(t *testing.T) {
+	cfg := SecurityHeadersDefaults()
+	cfg.PermissionsPolicy = ""
+	mw := SecurityHeaders(cfg)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if got := rec.Header().Get("Permissions-Policy"); got != "" {
+		t.Errorf("Permissions-Policy = %q; want empty (operator override-to-empty suppression)", got)
+	}
+	if got := rec.Header().Get("Strict-Transport-Security"); got == "" {
+		t.Errorf("HSTS suppressed too; the empty-string override is per-field")
 	}
 }

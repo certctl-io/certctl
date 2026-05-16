@@ -25,6 +25,7 @@ type SecurityHeadersConfig struct {
 	ContentTypeOptions    string // X-Content-Type-Options
 	ReferrerPolicy        string // Referrer-Policy
 	ContentSecurityPolicy string // Content-Security-Policy
+	PermissionsPolicy     string // Permissions-Policy (SEC-008 closure, Sprint 2 ACQ 2026-05-16)
 }
 
 // SecurityHeadersDefaults returns a recommended baseline.
@@ -78,6 +79,19 @@ type SecurityHeadersConfig struct {
 // Referrer-Policy: no-referrer-when-downgrade — preserves Referer
 // for same-origin navigation (useful for support/diagnostics) but
 // strips it on HTTPS→HTTP transitions.
+//
+// Permissions-Policy: deny-all-browser-features default. Acquisition-
+// audit SEC-008 closure (Sprint 2 ACQ, 2026-05-16). certctl is a
+// control-plane API + dashboard; no part of the surface needs
+// access to the camera, microphone, geolocation, accelerometer,
+// payment, USB, or the deprecated `interest-cohort` (FLoC) browser
+// feature. The deny-all default removes those attack/fingerprint
+// surfaces if certctl is ever embedded in a malicious page or if a
+// dashboard route is XSS-compromised post-CSP-bypass. Operators
+// running certctl with intentional dependence on any of these (e.g.
+// hardware-attestation flows wanting WebAuthn's USB transport) can
+// set `Cfg.PermissionsPolicy: ""` to suppress the header entirely,
+// or override with their own narrowed allowlist.
 func SecurityHeadersDefaults() SecurityHeadersConfig {
 	return SecurityHeadersConfig{
 		HSTS:                  "max-age=31536000; includeSubDomains",
@@ -85,6 +99,7 @@ func SecurityHeadersDefaults() SecurityHeadersConfig {
 		ContentTypeOptions:    "nosniff",
 		ReferrerPolicy:        "no-referrer-when-downgrade",
 		ContentSecurityPolicy: "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
+		PermissionsPolicy:     "accelerometer=(), camera=(), geolocation=(), microphone=(), payment=(), usb=(), interest-cohort=()",
 	}
 }
 
@@ -100,7 +115,7 @@ func SecurityHeaders(cfg SecurityHeadersConfig) func(http.Handler) http.Handler 
 	// Pre-trim each value once; the per-request hot path stays a
 	// straight set of map writes.
 	type headerEntry struct{ name, value string }
-	entries := make([]headerEntry, 0, 5)
+	entries := make([]headerEntry, 0, 6)
 	add := func(name, value string) {
 		v := strings.TrimSpace(value)
 		if v != "" {
@@ -112,6 +127,7 @@ func SecurityHeaders(cfg SecurityHeadersConfig) func(http.Handler) http.Handler 
 	add("X-Content-Type-Options", cfg.ContentTypeOptions)
 	add("Referrer-Policy", cfg.ReferrerPolicy)
 	add("Content-Security-Policy", cfg.ContentSecurityPolicy)
+	add("Permissions-Policy", cfg.PermissionsPolicy)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
