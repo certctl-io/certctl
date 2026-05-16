@@ -68,6 +68,45 @@ giving them the keys to the kingdom. The
 `internal/domain/auth/auditor_test.go` invariants pin this set going
 forward.
 
+### Auditor role invariants (DOC-002 / COMP-005 closure)
+
+Acquisition-audit DOC-002 + COMP-005 closure (Sprint 7 ACQ, 2026-05-16).
+The auditor role's permission set is **pinned at exactly two
+permissions** — `audit.read` and `audit.export` — and any drift breaks
+the SOC 2 / FedRAMP / PCI separation. The pin is enforced at three
+layers and the load-bearing layer is the unit-test set, not a bash CI
+guard:
+
+1. **Schema layer** — `migrations/000029_rbac.up.sql:261-262` seeds
+   exactly two `role_permissions` rows for `r-auditor`
+   (`r-auditor / p-audit-read / global / NULL` and
+   `r-auditor / p-audit-export / global / NULL`).
+   `migrations/000039_audit_crit1_perms.up.sql:111` adds an inline
+   comment confirming `r-auditor` was NOT widened by the migration that
+   shipped the five admin-only fine-grained perms.
+2. **Code layer** — `internal/domain/auth/DefaultRoles[RoleIDAuditor]`
+   matches the schema. A future code change that adds a non-audit
+   permission to the slice is caught by:
+3. **Test layer** (the load-bearing one) —
+   `internal/domain/auth/auditor_test.go` ships three pinning tests:
+   - `TestAuditorRoleHoldsExactlyAuditReadAndExport` — set-equality
+     comparison; fails on any add or remove
+   - `TestAuditorRoleDoesNotHoldMutatingOrReadingNonAuditPerms` —
+     enumerates the slice and rejects any permission outside the
+     `{audit.read, audit.export}` set; catches subtle widening even if
+     the set-equality test is bypassed
+   - `TestAuditorRoleSeparateFromViewer` — pins that the auditor and
+     viewer permission sets are disjoint except for `audit.read` (which
+     viewer shares by design); catches the "auditor inherits viewer
+     reads" leg
+
+A bash CI guard was deliberately **not** added — the property is
+already enforced at the Go test layer with stronger semantics
+(struct-aware set equality) than `grep` could provide. If a future
+contributor proposes widening `r-auditor`, the three tests above
+fail at `go test ./internal/domain/auth/...` BEFORE the change can
+land in a merge.
+
 The five **admin-only fine-grained perms** seeded by migration
 000030 gate the high-blast-radius endpoints:
 
