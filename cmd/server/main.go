@@ -2076,11 +2076,22 @@ func main() {
 			PerUserRPS:       cfg.RateLimit.PerUserRPS,
 			PerUserBurstSize: cfg.RateLimit.PerUserBurstSize,
 		})
+		// SEC-003 closure (Sprint 1, 2026-05-16). Pre-fix the
+		// rate-limit-enabled stack was rebuilt without
+		// securityHeadersMiddleware, silently dropping HSTS,
+		// X-Frame-Options, X-Content-Type-Options, Referrer-Policy,
+		// and Content-Security-Policy across every response when an
+		// operator flipped CERTCTL_RATE_LIMIT_ENABLED=true — a
+		// defensive-config toggle weakened browser-side security.
+		// The fixed stack keeps securityHeadersMiddleware at the same
+		// position as the default and inserts rateLimiter right after
+		// so a 429 response still carries the same headers as a 200.
 		middlewareStack = []func(http.Handler) http.Handler{
 			middleware.RequestID,
 			structuredLogger,
 			middleware.Recovery,
 			bodyLimitMiddleware,
+			securityHeadersMiddleware,
 			rateLimiter,
 			corsMiddleware,
 			// Phase 6 chain: Auth (session-then-Bearer fallback) → CSRF

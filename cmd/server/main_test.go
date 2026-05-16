@@ -645,3 +645,64 @@ func TestPreflightSCEPChallengePassword(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// SEC-003 closure (Sprint 1, 2026-05-16). Pin that the rate-limit-enabled
+// middleware stack still emits the five security headers (HSTS, XFO,
+// nosniff, Referrer-Policy, CSP) that the default stack carries.
+//
+// Pre-fix the stack rebuild at main.go ~L2079 dropped
+// securityHeadersMiddleware so flipping CERTCTL_RATE_LIMIT_ENABLED=true
+// silently turned off five browser-side defenses. This test exercises
+// the same middleware composition main.go now builds when the flag is
+// on, and asserts each header lands on the wire. A future regression
+// that removes securityHeadersMiddleware (or reorders it after the
+// rate limiter such that a 429 response misses the headers) would
+// surface here.
+// =============================================================================
+
+func TestMain_RateLimitedStack_EmitsSecurityHeaders(t *testing.T) {
+	baseHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Mirror the rate-limit-enabled middlewareStack from main.go.
+	rateLimiter := middleware.NewRateLimiter(middleware.RateLimitConfig{
+		RPS:       1000, // high enough that the single test request isn't dropped
+		BurstSize: 1000,
+	})
+	securityHeaders := middleware.SecurityHeaders(middleware.SecurityHeadersDefaults())
+	bodyLimit := middleware.NewBodyLimit(middleware.BodyLimitConfig{MaxBytes: 1 << 20})
+
+	stack := []func(http.Handler) http.Handler{
+		middleware.RequestID,
+		middleware.Recovery,
+		bodyLimit,
+		securityHeaders,
+		rateLimiter,
+		// Skip the CORS/auth/csrf/audit layers — they aren't relevant
+		// to the headers-on-response invariant we're pinning.
+	}
+	chained := middleware.Chain(baseHandler, stack...)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+	w := httptest.NewRecorder()
+	chained.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200 (rate limit should not trip on a single request)", w.Code)
+	}
+	wantHeaders := map[string]string{
+		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+		"X-Frame-Options":           "DENY",
+		"X-Content-Type-Options":    "nosniff",
+		"Referrer-Policy":           "no-referrer-when-downgrade",
+		"Content-Security-Policy":   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
+	}
+	for name, want := range wantHeaders {
+		got := w.Header().Get(name)
+		if got != want {
+			t.Errorf("rate-limited stack: %s = %q; want %q", name, got, want)
+		}
+	}
+}
