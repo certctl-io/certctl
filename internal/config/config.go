@@ -113,6 +113,32 @@ type Config struct {
 	// + window. The scheduler's userRetentionLoop reads Interval; the
 	// UserRetentionService reads RetentionWindow + BatchCap.
 	UserRetention UserRetentionConfig
+	// Network holds outbound-egress policy tunables. Acquisition-audit
+	// SEC-009 + RED-005 closure (Sprint 5 ACQ, 2026-05-16). Today the
+	// only field is BlockRFC1918Outbound; future egress-policy knobs
+	// (per-host allowlists, max-dial-time overrides) go here.
+	Network NetworkConfig
+}
+
+// NetworkConfig is the outbound-egress policy surface for certctl.
+// Acquisition-audit SEC-009 + RED-005 closure (Sprint 5 ACQ,
+// 2026-05-16).
+type NetworkConfig struct {
+	// BlockRFC1918Outbound, when true, extends the SSRF reserved-IP
+	// gate (internal/validation/ssrf.go::IsReservedIP) to include the
+	// three RFC 1918 ranges (10.0.0.0/8, 172.16.0.0/12,
+	// 192.168.0.0/16). Default false (preserves the certctl threat-
+	// model default that RFC1918 is legitimate destination space).
+	// Operators on hosted IaaS where RFC1918 is internal trust
+	// (Kubernetes service CIDRs that expose the API server inside
+	// RFC1918, internal-only monitoring stacks, etc.) opt in via
+	// CERTCTL_BLOCK_RFC1918_OUTBOUND=true. Wired at boot from
+	// cmd/server/main.go via validation.SetBlockRFC1918Outbound.
+	//
+	// IMPORTANT: enabling this also blocks RFC1918 from the certctl
+	// network scanner. Operators who scan their own RFC1918 space
+	// for cert-discovery MUST leave this disabled.
+	BlockRFC1918Outbound bool
 }
 
 // AuditChainConfig configures the audit_events tamper-evidence
@@ -464,10 +490,18 @@ func Load() (*Config, error) {
 			// NamedKeys is populated from CERTCTL_API_KEYS_NAMED below so Load()
 			// can surface parse errors alongside other config errors.
 
-			// Bundle-5 / Audit H-007: agent-registration bootstrap secret.
-			// Empty (default) = warn-mode pass-through; v2.2.0 will require it.
+			// Bundle-5 / Audit H-007 + acquisition-audit RED-003 closure
+			// (Sprint 5 ACQ, 2026-05-16): agent-registration bootstrap
+			// secret. The deny-empty default flipped from false → true
+			// on 2026-05-16. Operators upgrading from v2.1.x can re-
+			// open the warn-mode escape hatch by explicitly setting
+			// CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=false (one
+			// upgrade window); see CHANGELOG v2.2.0 for the migration
+			// note. Demo mode (CERTCTL_DEMO_MODE_ACK=true) keeps the
+			// pre-flip warn-mode for the screenshot path — see
+			// Validate() for the override site.
 			AgentBootstrapToken:          getEnv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", ""),
-			AgentBootstrapTokenDenyEmpty: getEnvBool("CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY", false),
+			AgentBootstrapTokenDenyEmpty: getEnvBool("CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY", true),
 			// Bundle 1 Phase 6: one-shot bootstrap token for the
 			// /v1/auth/bootstrap endpoint that mints the first admin
 			// key. Empty = bootstrap endpoint disabled (default).
@@ -754,6 +788,15 @@ func Load() (*Config, error) {
 			RetentionWindow: getEnvDuration("CERTCTL_USER_RETENTION_WINDOW", 30*24*time.Hour),
 			BatchCap:        getEnvInt("CERTCTL_USER_RETENTION_BATCH_CAP", 200),
 		},
+		// Acquisition-audit SEC-009 + RED-005 closure (Sprint 5 ACQ,
+		// 2026-05-16). Default false preserves the existing threat-model
+		// default (RFC1918 is legitimate destination space); operators
+		// on hosted IaaS opt in via CERTCTL_BLOCK_RFC1918_OUTBOUND=true.
+		// Wired into validation.SetBlockRFC1918Outbound at boot from
+		// cmd/server/main.go.
+		Network: NetworkConfig{
+			BlockRFC1918Outbound: getEnvBool("CERTCTL_BLOCK_RFC1918_OUTBOUND", false),
+		},
 	}
 
 	// Parse CERTCTL_API_KEYS_NAMED for named key authentication (M-002).
@@ -942,15 +985,21 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("auth secret is required for auth type %s", c.Auth.Type)
 	}
 
-	// Phase 2 SEC-H1 closure (2026-05-13): the AgentBootstrapTokenDenyEmpty
-	// staged feature flag. When the operator opts in via
-	// CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=true AND the bootstrap
-	// token is empty, Validate() returns a fail-closed error. Default
-	// flag value is false, preserving the existing v2.1.x warn-mode
-	// pass-through behavior for backward compatibility. The default-flip
-	// to true is scheduled for v2.2.0 in WORKSPACE-ROADMAP.md — operators
-	// get one upgrade window to set a real token.
-	if c.Auth.AgentBootstrapTokenDenyEmpty && c.Auth.AgentBootstrapToken == "" {
+	// Phase 2 SEC-H1 closure (2026-05-13) + acquisition-audit RED-003
+	// closure (Sprint 5 ACQ, 2026-05-16): the AgentBootstrapTokenDenyEmpty
+	// fail-closed gate. The flag flipped default from false → true on
+	// 2026-05-16; operators upgrading from v2.1.x can reopen the
+	// warn-mode escape hatch with CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=false
+	// for one upgrade window. CHANGELOG v2.2.0 documents the cutover.
+	//
+	// Demo-mode override: a screenshot/demo deploy with
+	// CERTCTL_DEMO_MODE_ACK=true skips this guard so the demo path
+	// stays one-command-up. The accompanying boot banner WARN in
+	// cmd/server/main.go keeps the posture visible — demo deploys
+	// already log a prominent "DEMO MODE ACTIVE" line at every boot.
+	// Production deploys never set DemoModeAck, so this override
+	// cannot inadvertently re-enable warn-mode in production.
+	if c.Auth.AgentBootstrapTokenDenyEmpty && c.Auth.AgentBootstrapToken == "" && !c.Auth.DemoModeAck {
 		return fmt.Errorf("phase-2 SEC-H1 fail-closed guard: %w", ErrAgentBootstrapTokenRequired)
 	}
 

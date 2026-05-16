@@ -228,3 +228,70 @@ func TestSafeHTTPDialContext_DefaultTimeoutWhenZero(t *testing.T) {
 		t.Fatal("expected reserved-address rejection")
 	}
 }
+
+// TestIsReservedIP_RFC1918_OptIn pins the Sprint 5 ACQ SEC-009 + RED-005
+// closure (2026-05-16). With the default-off toggle, RFC1918 stays
+// allowed (the certctl threat-model default). After
+// SetBlockRFC1918Outbound(true), the three RFC1918 ranges flip to
+// reserved and every IsReservedIP-derived path (isReservedIPForDial,
+// SafeHTTPDialContext, ValidateSafeURL, the network scanner) picks
+// up the new policy transitively. The defer restores the package-level
+// state so subsequent tests don't observe the flipped toggle.
+func TestIsReservedIP_RFC1918_OptIn(t *testing.T) {
+	prior := BlockRFC1918OutboundEnabled()
+	t.Cleanup(func() { SetBlockRFC1918Outbound(prior) })
+
+	// Default-off: RFC1918 stays non-reserved.
+	SetBlockRFC1918Outbound(false)
+	for _, addr := range []string{"10.0.0.1", "172.16.0.1", "192.168.1.1"} {
+		ip := net.ParseIP(addr)
+		if IsReservedIP(ip) {
+			t.Errorf("default-off: IsReservedIP(%s)=true; want false", addr)
+		}
+	}
+	// Toggle on: same three ranges flip to reserved.
+	SetBlockRFC1918Outbound(true)
+	for _, addr := range []string{"10.0.0.1", "10.255.255.254", "172.16.0.1", "172.31.255.254", "192.168.0.1", "192.168.255.254"} {
+		ip := net.ParseIP(addr)
+		if !IsReservedIP(ip) {
+			t.Errorf("toggle-on: IsReservedIP(%s)=false; want true", addr)
+		}
+	}
+	// Edge: a public address right outside RFC1918 (172.32.0.0/12
+	// boundary) must STAY non-reserved with the toggle on.
+	for _, addr := range []string{"172.32.0.1", "11.0.0.1", "192.169.0.1", "9.9.9.9", "8.8.8.8"} {
+		ip := net.ParseIP(addr)
+		if IsReservedIP(ip) {
+			t.Errorf("toggle-on edge: IsReservedIP(%s)=true; want false (just outside RFC1918)", addr)
+		}
+	}
+	// Toggle back off: RFC1918 returns to non-reserved.
+	SetBlockRFC1918Outbound(false)
+	for _, addr := range []string{"10.0.0.1", "172.16.0.1", "192.168.1.1"} {
+		ip := net.ParseIP(addr)
+		if IsReservedIP(ip) {
+			t.Errorf("toggle-off after on: IsReservedIP(%s)=true; want false", addr)
+		}
+	}
+}
+
+// TestSafeHTTPDialContext_RFC1918_OptIn pins that the toggle reaches
+// the SafeHTTPDialContext path transitively (not just IsReservedIP in
+// isolation). With toggle off, dialing 10.0.0.1 hits the connection-
+// level error (refused/timeout), NOT the "refusing to dial reserved
+// address" error. With toggle on, the dial fails closed at the
+// reserved-address check BEFORE attempting a TCP SYN.
+func TestSafeHTTPDialContext_RFC1918_OptIn(t *testing.T) {
+	prior := BlockRFC1918OutboundEnabled()
+	t.Cleanup(func() { SetBlockRFC1918Outbound(prior) })
+
+	SetBlockRFC1918Outbound(true)
+	dial := SafeHTTPDialContext(2 * time.Second)
+	_, err := dial(context.Background(), "tcp", "10.0.0.1:1")
+	if err == nil {
+		t.Fatal("toggle-on: expected reserved-address rejection for 10.0.0.1")
+	}
+	if !strings.Contains(err.Error(), "refusing to dial reserved address") {
+		t.Errorf("toggle-on: expected reserved-address message; got: %v", err)
+	}
+}

@@ -9,8 +9,62 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// blockRFC1918Outbound is the package-level toggle for the
+// acquisition-audit SEC-009 + RED-005 closure (Sprint 5 ACQ,
+// 2026-05-16). When true, IsReservedIP additionally returns true for
+// the RFC 1918 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16),
+// which by default are NOT reserved (see the IsReservedIP header
+// comment for the threat-model rationale). Operators on hosted IaaS
+// where RFC1918 IS internal trust (e.g. the kubeadm-default
+// 10.96.0.0/12 service CIDR exposes the Kubernetes API server on
+// 10.96.0.1) opt in via CERTCTL_BLOCK_RFC1918_OUTBOUND=true.
+//
+// Stored as atomic.Bool so the hot-path SSRF check in
+// SafeHTTPDialContext doesn't need a mutex; SetBlockRFC1918Outbound
+// is the single writer (called once at boot from
+// cmd/server/main.go via the config.Network.BlockRFC1918Outbound
+// value) and IsReservedIP is the reader. Because the toggle is
+// boot-time wiring rather than per-request runtime, the relaxed
+// memory ordering of atomic.Bool is sufficient and adds no
+// measurable per-call overhead.
+var blockRFC1918Outbound atomic.Bool
+
+// SetBlockRFC1918Outbound flips the package-level RFC1918-block
+// toggle. Called once at boot from cmd/server/main.go after
+// config.Load. Idempotent — operators can re-flip in tests by
+// passing the value they want.
+//
+// Acquisition-audit SEC-009 + RED-005 closure (Sprint 5 ACQ).
+func SetBlockRFC1918Outbound(block bool) {
+	blockRFC1918Outbound.Store(block)
+}
+
+// BlockRFC1918OutboundEnabled reports the current toggle state.
+// Exposed so callers (e.g. operator-facing /healthz diagnostics)
+// can render the effective SSRF policy without re-reading the env.
+func BlockRFC1918OutboundEnabled() bool {
+	return blockRFC1918Outbound.Load()
+}
+
+// rfc1918Nets is the pre-parsed set of RFC 1918 CIDRs, computed once
+// at package init so the IsReservedIP hot path doesn't re-parse the
+// strings on every call. A `nil` entry would surface a panic at
+// startup rather than silently no-op the toggle.
+var rfc1918Nets = func() []*net.IPNet {
+	out := make([]*net.IPNet, 0, 3)
+	for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
+		_, n, err := net.ParseCIDR(cidr)
+		if err != nil || n == nil {
+			panic("ssrf: failed to pre-parse RFC1918 CIDR " + cidr + ": " + err.Error())
+		}
+		out = append(out, n)
+	}
+	return out
+}()
 
 // IsReservedIP reports whether the given IP falls inside a range that
 // outbound HTTP egress (and the network-scanner CIDR expander) MUST treat
@@ -18,17 +72,31 @@ import (
 // endpoints at 169.254.169.254), multicast, and broadcast.
 //
 // RFC 1918 ranges (10/8, 172.16/12, 192.168/16) are intentionally NOT
-// treated as reserved. certctl is designed to manage certificates inside
-// private networks and filtering private address space would break the
-// primary use case. The threat model here is outbound HTTP to
-// cloud-metadata or localhost services, not general network reachability.
+// treated as reserved by default. certctl is designed to manage
+// certificates inside private networks and filtering private address
+// space would break the primary use case. The default threat model is
+// outbound HTTP to cloud-metadata or localhost services, not general
+// network reachability.
+//
+// Operators on hosted IaaS where RFC1918 IS internal trust (Kubernetes
+// service CIDRs that expose the API server inside RFC1918, internal-
+// only monitoring stacks, etc.) can opt in via
+// CERTCTL_BLOCK_RFC1918_OUTBOUND=true, which the boot path passes to
+// SetBlockRFC1918Outbound. When the toggle is on, the three RFC 1918
+// ranges are appended to the reserved set and every code path that
+// builds on IsReservedIP (isReservedIPForDial, IsReservedIPForDial,
+// SafeHTTPDialContext, ValidateSafeURL, the network scanner, the
+// webhook notifier) picks up the policy transitively without per-
+// call-site changes. This is acquisition-audit SEC-009 + RED-005
+// closure (Sprint 5 ACQ, 2026-05-16).
 //
 // This function is byte-identical in behaviour to the previous unexported
-// copy in internal/service/network_scan.go. It is exported here so both
-// the network scanner and the webhook notifier share a single
-// authoritative implementation. Broader IPv6 coverage and unspecified-
-// address handling live in SafeHTTPDialContext, where stricter policy is
-// appropriate for outbound HTTP egress.
+// copy in internal/service/network_scan.go (for the default-off case).
+// It is exported here so both the network scanner and the webhook
+// notifier share a single authoritative implementation. Broader IPv6
+// coverage and unspecified- address handling live in
+// SafeHTTPDialContext, where stricter policy is appropriate for
+// outbound HTTP egress.
 func IsReservedIP(ip net.IP) bool {
 	// Loopback: 127.0.0.0/8 (and ::1 via IsLoopback).
 	if ip.IsLoopback() {
@@ -56,6 +124,19 @@ func IsReservedIP(ip net.IP) bool {
 	// Broadcast: 255.255.255.255.
 	if ip.String() == "255.255.255.255" {
 		return true
+	}
+
+	// Acquisition-audit SEC-009 + RED-005 (Sprint 5 ACQ, 2026-05-16).
+	// Opt-in RFC 1918 block. The toggle is OFF by default — the
+	// default certctl threat model treats RFC1918 as legitimate
+	// destination space. Operators on hosted IaaS where RFC1918 is
+	// internal trust flip this via CERTCTL_BLOCK_RFC1918_OUTBOUND=true.
+	if blockRFC1918Outbound.Load() {
+		for _, n := range rfc1918Nets {
+			if n.Contains(ip) {
+				return true
+			}
+		}
 	}
 
 	return false

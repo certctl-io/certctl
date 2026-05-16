@@ -48,6 +48,7 @@ import (
 	"github.com/certctl-io/certctl/internal/service"
 	authsvc "github.com/certctl-io/certctl/internal/service/auth"
 	"github.com/certctl-io/certctl/internal/trustanchor"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 func main() {
@@ -124,17 +125,37 @@ func main() {
 		logger.Warn("⚠ DEMO MODE ACTIVE — CERTCTL_DEMO_MODE_ACK=true is set; every request is served as the synthetic admin actor `actor-demo-anon` (no authentication enforced). This deployment MUST NOT hold production keys, certificates, or audit history. To promote to production: (1) unset CERTCTL_DEMO_MODE_ACK; (2) set CERTCTL_AUTH_TYPE=api-key or oidc; (3) set CERTCTL_AUTH_SECRET to a fresh `openssl rand -base64 32`; (4) set CERTCTL_KEYGEN_MODE=agent; (5) rotate CERTCTL_CONFIG_ENCRYPTION_KEY to a fresh `openssl rand -base64 32` (≥ 32 bytes, not the change-me placeholder); (6) restart the server. See docs/operator/security.md for the full posture.")
 	}
 
-	// Bundle-5 / Audit H-007: deprecation WARN when the agent bootstrap
-	// token is unset. Pre-Bundle-5 there was no token at all; the v2.0.x
-	// default keeps the warn-mode pass-through so existing demo deploys
-	// keep working, but operators must set CERTCTL_AGENT_BOOTSTRAP_TOKEN
-	// before v2.2.0 lands. This is a one-shot startup line — the
-	// per-request path stays silent so a busy registration endpoint
-	// doesn't flood the log.
+	// Bundle-5 / Audit H-007 + acquisition-audit RED-003 closure
+	// (Sprint 5 ACQ, 2026-05-16): deny-empty default for the agent
+	// bootstrap token. v2.2.0 flipped CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY
+	// from false → true; Validate() now refuses to start with an
+	// empty token UNLESS the operator either (a) explicitly opts back
+	// into v2.1.x warn-mode with CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=false
+	// or (b) is running a demo deploy (CERTCTL_DEMO_MODE_ACK=true).
+	//
+	// The remaining code path here only fires in those two override
+	// scenarios — in both cases the operator has accepted the
+	// posture, but a one-shot startup line keeps the warn-mode case
+	// visible in journals.
 	if cfg.Auth.AgentBootstrapToken == "" {
-		logger.Warn("agent bootstrap token unset (CERTCTL_AGENT_BOOTSTRAP_TOKEN) — agents may self-register without authentication; this default will become deny-by-default in v2.2.0; generate one with: openssl rand -hex 32")
+		logger.Warn("agent bootstrap token unset (CERTCTL_AGENT_BOOTSTRAP_TOKEN) — agents may self-register without authentication; running in v2.1.x-compat warn-mode (DENY_EMPTY=false) or demo mode (DEMO_MODE_ACK=true). Production deploys MUST set the token; generate with: openssl rand -base64 32")
 	} else {
 		logger.Info("agent bootstrap token configured (length redacted; constant-time compare on POST /api/v1/agents)")
+	}
+
+	// Acquisition-audit SEC-009 + RED-005 closure (Sprint 5 ACQ,
+	// 2026-05-16). Opt-in RFC1918 outbound block for hosted-IaaS
+	// operators where private-IP space carries internal trust
+	// (Kubernetes API on 10.96.0.1 in default kubeadm clusters,
+	// cloud-provider monitoring endpoints, etc.). The toggle wires
+	// into the package-level state in internal/validation/ssrf.go;
+	// from there every IsReservedIP-derived path (SafeHTTPDialContext,
+	// ValidateSafeURL, the network scanner, the webhook + OIDC + ACME
+	// callers) picks up the policy transitively. Default false
+	// preserves the existing self-hosted threat model.
+	validation.SetBlockRFC1918Outbound(cfg.Network.BlockRFC1918Outbound)
+	if cfg.Network.BlockRFC1918Outbound {
+		logger.Info("RFC1918 outbound block ENABLED (CERTCTL_BLOCK_RFC1918_OUTBOUND=true) — 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 are reserved for outbound HTTP egress AND for the network scanner")
 	}
 
 	// Phase 6 SCALE-M3 closure (2026-05-14): operator-overridable

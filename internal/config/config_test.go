@@ -53,6 +53,14 @@ func setMinimalValidEnv(t *testing.T) {
 	certPath, keyPath := generateTestTLSPair(t)
 	t.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", certPath)
 	t.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", keyPath)
+	// Acquisition-audit RED-003 closure (Sprint 5 ACQ, 2026-05-16):
+	// the deny-empty default flipped to true, so Load() now refuses
+	// to start with an empty bootstrap token. Supply a placeholder
+	// so Load()-based tests that don't specifically test the
+	// deny-empty gate continue to pass. Tests that DO exercise the
+	// empty-token gate explicitly override via
+	// t.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", "") after this helper.
+	t.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", "test-bootstrap-token-placeholder")
 }
 
 // generateTestTLSPair writes an ECDSA P-256 self-signed certificate + private
@@ -413,9 +421,14 @@ func TestLoad_CommaSeparatedList(t *testing.T) {
 	}
 }
 
-// Phase 2 SEC-H1 (2026-05-13) — AgentBootstrapTokenDenyEmpty staged flag.
-// When false (default), an empty token is permitted (v2.1.x warn-mode
-// pass-through preserved). When true, an empty token fails closed.
+// Phase 2 SEC-H1 (2026-05-13) introduced the AgentBootstrapTokenDenyEmpty
+// staged flag with default false. Acquisition-audit RED-003 closure
+// (Sprint 5 ACQ, 2026-05-16) flipped the default to true. The test
+// below preserves the back-compat path (operator explicitly opts back
+// to the v2.1.x warn-mode pass-through); the new default behavior is
+// covered by TestLoad_AgentBootstrapTokenDenyEmpty_DefaultIsTrue +
+// TestValidate_AgentBootstrapTokenDenyEmpty_True_EmptyTokenFailsClosed
+// further down in this file.
 func TestValidate_AgentBootstrapTokenDenyEmpty_DefaultFalse_AllowsEmpty(t *testing.T) {
 	cfg := &Config{
 		Server:    validServerConfig(t),
@@ -2224,5 +2237,114 @@ func TestWarnExternalSslmodeDisable_QuietOnUnparseableOrEmpty(t *testing.T) {
 				t.Errorf("expected silence for unparseable/non-postgres input (%q); got: %s", url, buf.String())
 			}
 		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Acquisition-audit Sprint 5 ACQ — RED-003 deny-empty default flip
+// (2026-05-16). Three new tests pin the new default + the two
+// override paths (operator opt-back, demo-mode override).
+// -----------------------------------------------------------------------------
+
+// TestLoad_AgentBootstrapTokenDenyEmpty_DefaultIsTrue pins the post-
+// 2026-05-16 default. Load() with no CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY
+// set must produce a Config whose AuthConfig.AgentBootstrapTokenDenyEmpty
+// is true. Together with the next test, this proves the default flip
+// from false → true at the boot path.
+func TestLoad_AgentBootstrapTokenDenyEmpty_DefaultIsTrue(t *testing.T) {
+	clearCertctlEnv(t)
+	setMinimalValidEnv(t)
+	// Set a real bootstrap token so the deny-empty + empty-token guard
+	// doesn't trip — we're asserting the default flag VALUE here, not
+	// the guard behavior.
+	t.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", "a-real-32-byte-token-value-here-x")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() = %v; want nil", err)
+	}
+	if !cfg.Auth.AgentBootstrapTokenDenyEmpty {
+		t.Error("Load() default AgentBootstrapTokenDenyEmpty = false; want true (Sprint 5 ACQ flip on 2026-05-16)")
+	}
+}
+
+// TestValidate_DenyEmptyDefault_RefusesWithoutToken pins the new
+// default's effect: an empty token, with the flag at its
+// post-2026-05-16 default of true, fails closed at Validate().
+// Different shape from
+// TestValidate_AgentBootstrapTokenDenyEmpty_True_EmptyTokenFailsClosed
+// — that test sets the flag explicitly; this one drives the flag
+// value from Load() defaults so it tracks any future default flip.
+func TestValidate_DenyEmptyDefault_RefusesWithoutToken(t *testing.T) {
+	clearCertctlEnv(t)
+	setMinimalValidEnv(t)
+	// setMinimalValidEnv now sets CERTCTL_AGENT_BOOTSTRAP_TOKEN to
+	// a placeholder (post-Sprint-5 ACQ default-flip — most Load()-
+	// based tests need it). Override back to empty here because
+	// THIS test is specifically the empty-token + default-deny-empty
+	// fail-closed assertion.
+	t.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", "")
+	// CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY deliberately unset
+	// so the default (true) applies.
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() = nil; want ErrAgentBootstrapTokenRequired (deny-empty default flipped to true; empty token must fail closed)")
+	}
+	if !errors.Is(err, ErrAgentBootstrapTokenRequired) {
+		t.Errorf("Load() err = %v; want errors.Is to match ErrAgentBootstrapTokenRequired", err)
+	}
+}
+
+// TestValidate_DenyEmptyExplicitFalse_AllowsEmpty pins the v2.1.x
+// back-compat path: an operator who explicitly opts out of the new
+// default (CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY=false) keeps the
+// warn-mode pass-through. CHANGELOG v2.2.0 documents this as a
+// one-upgrade-window escape hatch for operators who haven't generated
+// a token yet.
+func TestValidate_DenyEmptyExplicitFalse_AllowsEmpty(t *testing.T) {
+	clearCertctlEnv(t)
+	setMinimalValidEnv(t)
+	t.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN_DENY_EMPTY", "false")
+	// Override setMinimalValidEnv's placeholder so we exercise the
+	// "operator explicit opt-out + empty token" path.
+	t.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() = %v; want nil (explicit deny-empty=false allows empty token)", err)
+	}
+	if cfg.Auth.AgentBootstrapTokenDenyEmpty {
+		t.Error("AgentBootstrapTokenDenyEmpty = true; want false (operator explicit opt-out)")
+	}
+}
+
+// TestValidate_DenyEmpty_DemoModeAckOverride_AllowsEmpty pins the
+// demo-mode escape hatch. A demo deploy with
+// CERTCTL_DEMO_MODE_ACK=true (plus the SEC-H3 24h-fresh TS) keeps
+// the warn-mode pass-through even with deny-empty=true. The
+// accompanying boot banner WARN in cmd/server/main.go keeps the
+// posture visible to log scrapers — demo deploys already emit a
+// prominent "DEMO MODE ACTIVE" banner at every boot.
+func TestValidate_DenyEmpty_DemoModeAckOverride_AllowsEmpty(t *testing.T) {
+	cfg := &Config{
+		Server:   validServerConfig(t),
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth: AuthConfig{
+			Type:                         "none",
+			AgentBootstrapToken:          "",
+			AgentBootstrapTokenDenyEmpty: true,
+			DemoModeAck:                  true,
+			// 24h-fresh TS — SEC-H3 already gates demo-mode boot on
+			// TS freshness; supply a current epoch so we exercise
+			// only the deny-empty-override leg, not the SEC-H3 leg.
+			DemoModeAckTS: strconv.FormatInt(time.Now().Unix(), 10),
+		},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() = %v; want nil (demo-mode override should allow empty token)", err)
 	}
 }

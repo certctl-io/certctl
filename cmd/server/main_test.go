@@ -256,6 +256,18 @@ func TestMain_ServerConfigFromEnvironment(t *testing.T) {
 	os.Setenv("CERTCTL_SERVER_PORT", "8080")
 	os.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", certPath)
 	os.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", keyPath)
+	// Acquisition-audit RED-003 closure (Sprint 5 ACQ, 2026-05-16):
+	// deny-empty default flipped to true; supply a placeholder token
+	// so Load() succeeds. The defer below restores prior env.
+	oldBootstrap := os.Getenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN")
+	os.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", "test-bootstrap-token-placeholder")
+	defer func() {
+		if oldBootstrap != "" {
+			os.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", oldBootstrap)
+		} else {
+			os.Unsetenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN")
+		}
+	}()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -317,6 +329,18 @@ func TestMain_AuthTypeConfiguration(t *testing.T) {
 
 	// Set auth secret for api-key mode
 	os.Setenv("CERTCTL_AUTH_SECRET", "test-secret")
+	// Acquisition-audit RED-003 closure (Sprint 5 ACQ, 2026-05-16):
+	// deny-empty default flipped to true; supply a placeholder token
+	// so Load() succeeds.
+	oldBootstrap := os.Getenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN")
+	os.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", "test-bootstrap-token-placeholder")
+	defer func() {
+		if oldBootstrap != "" {
+			os.Setenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", oldBootstrap)
+		} else {
+			os.Unsetenv("CERTCTL_AGENT_BOOTSTRAP_TOKEN")
+		}
+	}()
 
 	testCases := []string{"api-key", "none"}
 
