@@ -74,22 +74,55 @@ metric surface meet our SLO needs today" — not "is the right library
 under the hood." If the answer to the first question is yes, the
 second is a refactor, not a feature gap.
 
-## Tracing — explicitly not yet shipped
+## Tracing — OTLP surface available, instrumentation pending
 
-certctl does **not** ship distributed tracing instrumentation today:
+Sprint 6 ACQ DEPL-006 closure (2026-05-16) stood up the OTel tracer-
+provider surface. Operators with an OTel collector can opt in via:
 
-- No OpenTelemetry SDK setup in `cmd/server/main.go`.
-- No OTLP exporter wired into outbound calls (issuer connectors,
-  agent enrollment, etc.).
-- The `go.opentelemetry.io/otel` packages that appear in
-  [`go.mod`](../../go.mod) are indirect-only — they're transitive
-  dependencies of `coreos/go-oidc` and similar.
+```
+CERTCTL_OTEL_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com:4318
+```
 
-This is honest: there is no in-process tracing surface to monitor,
-correlate, or sample. If your environment requires end-to-end traces
-across the certctl control plane + agents + issuer backends, this is
-a gap you would close on the certctl side as part of a v3 work item.
-Until then:
+When `CERTCTL_OTEL_ENABLED` is true, `cmd/server/main.go` calls
+`internal/observability.Init` which:
+
+- Constructs an OTLP/HTTP exporter (chosen over OTLP/gRPC to keep
+  the dependency surface narrow — see `internal/observability/otel.go`
+  header for the transport-choice rationale).
+- Registers a real `sdktrace.TracerProvider` as the otel global.
+- Honors the standard OTel env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
+  `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_INSECURE`,
+  `OTEL_SERVICE_NAME` overrides the default `certctl-server`, etc.).
+- Defers a graceful shutdown that flushes the in-flight batcher.
+
+What this **does not** ship yet:
+
+- No per-handler / per-DB / per-connector span instrumentation in
+  the certctl code base. The OTel SDK emits the spans it generates
+  internally (process resource attributes, eventual stdlib HTTP
+  spans), but certctl-domain spans (issuance, renewal, deployment,
+  agent enrollment) are a v2.3 roadmap follow-up.
+- No tracing-correlated metric exemplars in the Prometheus
+  histograms above. Those still ship the per-issuer latency signal
+  without per-request fan-out.
+- No backwards-compat shim — operators who never set
+  `CERTCTL_OTEL_ENABLED` (the default) see zero behavior change.
+  The init returns a no-op shutdown so the deferred call is safe
+  to invoke unconditionally.
+
+When this matters today:
+
+- Operators wiring up a v3 instrumentation effort have the OTel
+  surface in place; they only need to add `tracer.Start(ctx, "…")`
+  call sites in the handler/service code.
+- Operators evaluating certctl for acquisition / due-diligence see
+  an opt-in OTel surface in the current release rather than a "v3
+  roadmap item" — a useful signal for buyer credibility per the
+  acquisition-thesis framing in `WORKSPACE-ROADMAP.md` §3.
+
+Existing correlation surfaces stay in place until span coverage
+ships:
 
 - Structured logs include a `request_id` you can correlate across
   the server log stream. See
@@ -99,8 +132,9 @@ Until then:
   same per-issuer latency signal a trace span would, just without
   the per-request fan-out.
 
-OpenTelemetry instrumentation is tracked in
-[WORKSPACE-ROADMAP.md](../../WORKSPACE-ROADMAP.md) as a v3 item.
+Per-handler / per-query / per-connector span instrumentation is
+tracked in [WORKSPACE-ROADMAP.md](../../WORKSPACE-ROADMAP.md) under
+§2 (NHI / Agent Identity, Phase 4 in the path-b build plan).
 
 ## Logging
 
