@@ -25,9 +25,24 @@ set -e
 # useMutation-mocking test patterns and the wrapper's own unit
 # tests don't trip the production guard — symmetric with L-015
 # and L-019 above.
+#
+# Sprint 5 ARCH-001-A carve-out (2026-05-16): web/src/api/generated/**
+# is the Orval-generated React Query layer (TanStack Query client
+# mode, tags-split). Orval's mutation template calls bare useMutation
+# directly — by design, because the generated layer is one
+# abstraction below the wrapper. The Composition pattern is: hand-
+# written feature code consumes the generated hooks AND wraps any
+# mutation through useTrackedMutation at the call site (which routes
+# through the generated hook's mutationFn under the hood). Adding the
+# wrapper inside the generated tree would be overwritten on every
+# regenerate, so the contract is "wrapper at the feature layer, not
+# the codegen layer." The drift guard (openapi-codegen-drift.sh)
+# already pins the generated tree against the canonical openapi.yaml,
+# so this exclusion can't be abused to smuggle in a hand-edit.
 BARE=$(grep -rnE '\buseMutation\(' web/src/ 2>/dev/null \
   | grep -v 'web/src/hooks/useTrackedMutation\.ts' \
   | grep -vE '\.test\.(ts|tsx)(:[0-9]+)?:' \
+  | grep -v '^web/src/api/generated/' \
   || true)
 if [ -n "$BARE" ]; then
   echo "::error::M-009 hard-zero regression: bare useMutation() call(s) outside the wrapper:"
