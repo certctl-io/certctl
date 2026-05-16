@@ -342,6 +342,17 @@ type RateLimitConfig struct {
 	// Setting: CERTCTL_RATE_LIMIT_PER_USER_BURST environment variable.
 	PerUserBurstSize int
 
+	// BucketTTL bounds the unused-bucket lifetime in the token-bucket
+	// map. Idle buckets older than BucketTTL are reclaimed by a
+	// background sweeper running every (BucketTTL/4). Default 1 hour;
+	// values < 1 minute are clamped up to 1 minute in the limiter
+	// constructor. Set this lower if the server faces high-cardinality
+	// unauthenticated traffic (CGNAT churn, Tor exit lists, scanners)
+	// and the map RSS becomes a concern.
+	// SEC-006 closure (Sprint 2, 2026-05-16).
+	// Setting: CERTCTL_RATE_LIMIT_BUCKET_TTL environment variable.
+	BucketTTL time.Duration
+
 	// SlidingWindowBackend selects which backend implements the
 	// per-key sliding-window-log limiters wired in cmd/server/main.go
 	// (break-glass login, OCSP per-IP, cert-export per-actor, EST

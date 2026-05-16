@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -152,6 +153,14 @@ type RateLimitConfig struct {
 	// PerUserBurstSize overrides BurstSize for authenticated callers.
 	// Zero means "use BurstSize".
 	PerUserBurstSize int
+
+	// BucketTTL bounds the lifetime of an unused token bucket in the
+	// per-key map. The background sweeper runs every (BucketTTL/4) and
+	// removes entries whose last allow() call is older than BucketTTL.
+	// Zero or negative values fall through to a 1-hour default; values
+	// below 1 minute are clamped up to 1 minute (sweeper sanity).
+	// SEC-006 closure (Sprint 2, 2026-05-16).
+	BucketTTL time.Duration
 }
 
 // NewRateLimiter creates a per-key token bucket rate limiting middleware.
@@ -166,11 +175,18 @@ type RateLimitConfig struct {
 //   - Unauthenticated: "ip:" + r.RemoteAddr's host portion
 //
 // The bucket map is sync.RWMutex-guarded; create-on-demand for new keys.
-// There is no eviction; for a long-running server with millions of unique
-// IPs this can leak memory. A future enhancement is per-key TTL via a
-// lazy sweeper. For now the leak is bounded by realistic operator IP
-// fan-out and is acceptable per OWASP ASVS L2 (the threat model is abuse
-// by a known set of clients, not infinite-cardinality scanners).
+//
+// SEC-006 closure (Sprint 2, 2026-05-16). Pre-fix the bucket map had no
+// eviction, so high-cardinality unauthenticated traffic (CGNAT churn,
+// Tor exit lists, botnets, infinite-cardinality scanners) grew process
+// memory unboundedly. Each bucket now carries `lastAccess`; a background
+// sweeper goroutine (one per limiter) wakes every (bucketTTL / 4) and
+// removes entries whose lastAccess is older than `bucketTTL`. Default
+// TTL is 1 hour — well above realistic operator IP churn windows so a
+// returning client gets the same bucket, but bounded enough that a
+// scanner's churn is reclaimed within an hour. Operators can override
+// via cfg.BucketTTL (or the CERTCTL_RATE_LIMIT_BUCKET_TTL env var that
+// cmd/server/main.go threads through).
 func NewRateLimiter(cfg RateLimitConfig) func(http.Handler) http.Handler {
 	// Default per-user budgets to the IP-keyed budget when not overridden.
 	perUserRPS := cfg.PerUserRPS
@@ -182,13 +198,32 @@ func NewRateLimiter(cfg RateLimitConfig) func(http.Handler) http.Handler {
 		perUserBurst = float64(cfg.BurstSize)
 	}
 
+	// SEC-006: bucket TTL eviction. Default 1h; minimum 1m to keep
+	// the sweeper from running pathologically often if an operator
+	// sets a tiny value.
+	bucketTTL := cfg.BucketTTL
+	if bucketTTL <= 0 {
+		bucketTTL = time.Hour
+	}
+	if bucketTTL < time.Minute {
+		bucketTTL = time.Minute
+	}
+
 	limiter := &keyedRateLimiter{
 		ipRate:    cfg.RPS,
 		ipBurst:   float64(cfg.BurstSize),
 		userRate:  perUserRPS,
 		userBurst: perUserBurst,
 		buckets:   make(map[string]*tokenBucket),
+		bucketTTL: bucketTTL,
 	}
+
+	// Sweeper goroutine. Single goroutine per limiter; production wires
+	// 2 limiters (default + no-auth-fallback) so the cost is 2 idle
+	// goroutines per server. Lives for the process lifetime; no
+	// shutdown handle is exposed because main.go owns both limiters
+	// for the entire run.
+	go limiter.sweepLoop()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +266,12 @@ func rateLimitKey(r *http.Request) (string, bool) {
 
 // keyedRateLimiter holds a token bucket per (user-or-ip) key with separate
 // rate / burst defaults for the user-keyed and ip-keyed dimensions.
+//
+// SEC-006: bucketTTL bounds the unused-bucket lifetime; sweepLoop runs
+// in a goroutine spawned by NewRateLimiter and evicts entries whose
+// lastAccess is older than bucketTTL on every (bucketTTL/4) tick.
+// evictedTotal exposes the lifetime eviction count (atomic-loaded by
+// tests and the operator stats endpoint).
 type keyedRateLimiter struct {
 	mu        sync.RWMutex
 	buckets   map[string]*tokenBucket
@@ -238,6 +279,14 @@ type keyedRateLimiter struct {
 	ipBurst   float64
 	userRate  float64
 	userBurst float64
+
+	bucketTTL    time.Duration
+	evictedTotal atomic.Uint64
+	// sweepTick is the channel sweepLoop ticks on. Default time.Ticker;
+	// tests swap to a manual chan time.Time for deterministic eviction.
+	// Set via the (test-only) seam noted below; production never
+	// reassigns this field.
+	sweepTickCh <-chan time.Time
 }
 
 func (k *keyedRateLimiter) allow(key string, isUser bool) bool {
@@ -260,22 +309,90 @@ func (k *keyedRateLimiter) allow(key string, isUser bool) bool {
 				burstSize:  burst,
 				tokens:     burst,
 				lastRefill: time.Now(),
+				lastAccess: time.Now(),
 			}
 			k.buckets[key] = tb
 		}
 		k.mu.Unlock()
 	}
-	return tb.allow()
+	allowed := tb.allow()
+	// SEC-006: update lastAccess on every call (cheap; same mutex
+	// the bucket already holds via tb.allow's mu). Sweeper reads
+	// this to decide eviction.
+	tb.touch()
+	return allowed
+}
+
+// sweepLoop is the background eviction goroutine spawned by
+// NewRateLimiter. It wakes every bucketTTL/4 and removes any bucket
+// whose lastAccess is older than bucketTTL. The (bucketTTL/4) cadence
+// is a compromise — fast enough to keep the map ceiling tight,
+// slow enough that the sweep cost amortises across many requests.
+// SEC-006 closure.
+func (k *keyedRateLimiter) sweepLoop() {
+	// Test seam: if a manual tick channel is wired, use it. Production
+	// always uses time.NewTicker which time.Time-types the channel
+	// identically.
+	if k.sweepTickCh != nil {
+		for range k.sweepTickCh {
+			k.sweep()
+		}
+		return
+	}
+	period := k.bucketTTL / 4
+	if period < time.Second {
+		period = time.Second
+	}
+	t := time.NewTicker(period)
+	defer t.Stop()
+	for range t.C {
+		k.sweep()
+	}
+}
+
+// sweep removes every bucket whose lastAccess is older than bucketTTL
+// and bumps evictedTotal. Exported for tests via a same-package alias.
+func (k *keyedRateLimiter) sweep() {
+	cutoff := time.Now().Add(-k.bucketTTL)
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for key, tb := range k.buckets {
+		if tb.lastAccessTime().Before(cutoff) {
+			delete(k.buckets, key)
+			k.evictedTotal.Add(1)
+		}
+	}
 }
 
 // tokenBucket implements a simple thread-safe token bucket rate limiter.
 // This avoids importing golang.org/x/time/rate to keep dependencies minimal.
+//
+// SEC-006: lastAccess is updated on every allow() call (via touch()) so
+// the keyedRateLimiter sweeper can evict idle buckets without a second
+// per-key map. Guarded by the same mu as rate-limiting state.
 type tokenBucket struct {
 	mu         sync.Mutex
 	rate       float64   // tokens per second
 	burstSize  float64   // max tokens
 	tokens     float64   // current tokens
 	lastRefill time.Time // last refill time
+	lastAccess time.Time // last allow() call — for SEC-006 sweeper
+}
+
+// touch updates the bucket's lastAccess timestamp under its own mutex.
+// Called from keyedRateLimiter.allow after the rate-limit decision.
+func (tb *tokenBucket) touch() {
+	tb.mu.Lock()
+	tb.lastAccess = time.Now()
+	tb.mu.Unlock()
+}
+
+// lastAccessTime is the sweeper's read accessor. Uses the bucket's
+// own mutex so the read is consistent with concurrent touch() calls.
+func (tb *tokenBucket) lastAccessTime() time.Time {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	return tb.lastAccess
 }
 
 func (tb *tokenBucket) allow() bool {

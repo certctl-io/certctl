@@ -2080,6 +2080,11 @@ func main() {
 			BurstSize:        cfg.RateLimit.BurstSize,
 			PerUserRPS:       cfg.RateLimit.PerUserRPS,
 			PerUserBurstSize: cfg.RateLimit.PerUserBurstSize,
+			// SEC-006 (Sprint 2): bounded bucket TTL so a long-running
+			// server with high-cardinality unauthenticated traffic
+			// (CGNAT churn, Tor exits, scanners) doesn't grow the map
+			// indefinitely.
+			BucketTTL: cfg.RateLimit.BucketTTL,
 		})
 		// SEC-003 closure (Sprint 1, 2026-05-16). Pre-fix the
 		// rate-limit-enabled stack was rebuilt without
@@ -2166,6 +2171,10 @@ func main() {
 		noAuthRateLimiter := middleware.NewRateLimiter(middleware.RateLimitConfig{
 			RPS:       cfg.RateLimit.RPS,
 			BurstSize: cfg.RateLimit.BurstSize,
+			// SEC-006 closure (Sprint 2): same bucket-TTL eviction for the
+			// no-auth limiter — this one's the higher exposure since every
+			// unauthenticated probe gets a fresh IP-keyed bucket.
+			BucketTTL: cfg.RateLimit.BucketTTL,
 		})
 		noAuthMiddleware = append(noAuthMiddleware, noAuthRateLimiter)
 	}

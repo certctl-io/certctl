@@ -446,11 +446,16 @@ func Load() (*Config, error) {
 			},
 		},
 		RateLimit: RateLimitConfig{
-			Enabled:                      getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
-			RPS:                          getEnvFloat("CERTCTL_RATE_LIMIT_RPS", 50),
-			BurstSize:                    getEnvInt("CERTCTL_RATE_LIMIT_BURST", 100),
-			PerUserRPS:                   getEnvFloat("CERTCTL_RATE_LIMIT_PER_USER_RPS", 0),
-			PerUserBurstSize:             getEnvInt("CERTCTL_RATE_LIMIT_PER_USER_BURST", 0),
+			Enabled:          getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
+			RPS:              getEnvFloat("CERTCTL_RATE_LIMIT_RPS", 50),
+			BurstSize:        getEnvInt("CERTCTL_RATE_LIMIT_BURST", 100),
+			PerUserRPS:       getEnvFloat("CERTCTL_RATE_LIMIT_PER_USER_RPS", 0),
+			PerUserBurstSize: getEnvInt("CERTCTL_RATE_LIMIT_PER_USER_BURST", 0),
+			// SEC-006 closure (Sprint 2, 2026-05-16): bounded unused-bucket
+			// lifetime. 1h chosen to be well above realistic operator IP
+			// churn (returning clients keep their bucket) and well below
+			// the unbounded-leak window the pre-fix code allowed.
+			BucketTTL:                    getEnvDuration("CERTCTL_RATE_LIMIT_BUCKET_TTL", 1*time.Hour),
 			SlidingWindowBackend:         getEnv("CERTCTL_RATE_LIMIT_BACKEND", "memory"),
 			SlidingWindowJanitorInterval: getEnvDuration("CERTCTL_RATE_LIMIT_JANITOR_INTERVAL", 5*time.Minute),
 		},
