@@ -1,6 +1,6 @@
 # Runbook: PostgreSQL backup for certctl
 
-> Last reviewed: 2026-05-16 (Sprint 4 ACQ — CI restore verification subsection added)
+> Last reviewed: 2026-05-16
 
 Use this when:
 - You're setting up a new certctl deployment and need a backup policy
