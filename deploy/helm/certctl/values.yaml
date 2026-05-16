@@ -160,6 +160,17 @@ server:
     type: ClusterIP
     port: 8443
     annotations: {}
+    # DEPL-006 closure (Sprint 3, 2026-05-16). Optional sticky-session
+    # routing. REQUIRED when server.replicas > 1 so login + CSRF token
+    # rows stay on the same pod for the duration of a session — the
+    # default round-robin load balancing breaks those flows. Set to
+    # "ClientIP" for production HA (see deploy/helm/examples/values-prod-ha.yaml).
+    # Leave empty for single-replica deploys.
+    sessionAffinity: ""
+    # When sessionAffinity is set, timeout window (in seconds) the
+    # Service maps a source IP to the same pod. Default null →
+    # Kubernetes applies its built-in default (10800s / 3h).
+    sessionAffinityTimeoutSeconds: null
 
   # Authentication configuration.
   # Valid types: "api-key" (production) or "none" (demo only — disables

@@ -72,3 +72,28 @@ IMPORTANT NOTES FOR PRODUCTION:
    - All containers run as non-root
    - Implement network policies to restrict traffic between components
    - Consider pod security policies or security standards for your cluster
+{{- /*
+  DEPL-006 closure (Sprint 3, 2026-05-16). Loud notice when the
+  operator runs a multi-replica deploy without crossing the two
+  required HA toggles. Per-pod rate-limit buckets and round-robin
+  load balancing both silently break correctness above replicas:1.
+*/}}
+{{- if gt (int .Values.server.replicas) 1 }}
+
+⚠️  HA MISCONFIGURATION WARNINGS (replicas={{ .Values.server.replicas }}):
+{{- $backend := .Values.server.rateLimiting.backend | default "memory" }}
+{{- if eq $backend "memory" }}
+   - server.rateLimiting.backend = "memory" with replicas > 1 gives each
+     pod its own bucket map, so the configured cap is effectively
+     multiplied by the replica count. Set
+     `--set server.rateLimiting.backend=postgres` (see DEPL-006 /
+     docs/operator/runbooks/ha.md).
+{{- end }}
+{{- if not .Values.server.service.sessionAffinity }}
+   - server.service.sessionAffinity is empty. Round-robin Service load
+     balancing routes login → /api/v1/auth/login → /api/v1/auth/csrf
+     across different pods, breaking the CSRF token + session cookie
+     handshake. Set
+     `--set server.service.sessionAffinity=ClientIP`.
+{{- end }}
+{{- end }}

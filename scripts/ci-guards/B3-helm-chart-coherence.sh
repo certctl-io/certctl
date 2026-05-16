@@ -152,10 +152,62 @@ if helm template c "$CHART" \
   failed=1
 fi
 
+# Check 8 — DEPL-006 (Sprint 3 closure): when
+# server.service.sessionAffinity is set, server-service.yaml MUST
+# render the field. Pre-fix the chart silently dropped the value
+# and docs/operator/runbooks/ha.md's instructions had no effect.
+if helm template c "$CHART" \
+      --set server.tls.existingSecret=ci \
+      --set postgresql.auth.password=p \
+      --set server.auth.apiKey=k \
+      --set server.service.sessionAffinity=ClientIP \
+      > "$TMP/affinity.yaml" 2> "$TMP/affinity.err"; then
+  if ! grep -q 'sessionAffinity: ClientIP' "$TMP/affinity.yaml"; then
+    echo "::error file=${CHART}::B3 regression (DEPL-006): server.service.sessionAffinity=ClientIP did not render. Round-robin Service routing will break login + CSRF flows."
+    failed=1
+  fi
+else
+  echo "::error file=${CHART}::B3 regression (DEPL-006): sessionAffinity mode failed to render."
+  cat "$TMP/affinity.err"
+  failed=1
+fi
+
+# Check 7 — DEPL-003 (Sprint 3 closure): when migrations.viaHook=true
+# is set, the server Deployment env block MUST render
+# CERTCTL_MIGRATIONS_VIA_HOOK=true. Without it the server runs
+# boot-time migrations alongside the pre-install/pre-upgrade hook
+# Job, racing on the schema lock.
+if helm template c "$CHART" \
+      --set server.tls.existingSecret=ci \
+      --set postgresql.auth.password=p \
+      --set server.auth.apiKey=k \
+      --set migrations.viaHook=true \
+      > "$TMP/viahook.yaml" 2> "$TMP/viahook.err"; then
+  if ! grep -q 'name: CERTCTL_MIGRATIONS_VIA_HOOK' "$TMP/viahook.yaml"; then
+    echo "::error file=${CHART}::B3 regression (DEPL-003): migrations.viaHook=true did not render CERTCTL_MIGRATIONS_VIA_HOOK in the server Deployment env block. Server pods will race the hook Job."
+    failed=1
+  fi
+  # Inverse: with viaHook unset (default), the env var MUST NOT render.
+  if helm template c "$CHART" \
+        --set server.tls.existingSecret=ci \
+        --set postgresql.auth.password=p \
+        --set server.auth.apiKey=k \
+        > "$TMP/noviahook.yaml" 2> "$TMP/noviahook.err"; then
+    if grep -q 'name: CERTCTL_MIGRATIONS_VIA_HOOK' "$TMP/noviahook.yaml"; then
+      echo "::error file=${CHART}::B3 regression (DEPL-003): default render (viaHook=false) leaked CERTCTL_MIGRATIONS_VIA_HOOK env var. Conditional template missing the {{- if }} guard."
+      failed=1
+    fi
+  fi
+else
+  echo "::error file=${CHART}::B3 regression (DEPL-003): migrations.viaHook=true mode failed to render."
+  cat "$TMP/viahook.err"
+  failed=1
+fi
+
 if [ "$failed" -ne 0 ]; then
   echo ""
   echo "${GUARD_NAME}: FAILED — Helm chart coherence regression."
   exit 1
 fi
 
-echo "${GUARD_NAME}: clean (default + external-Postgres + cert-manager + production hardening + 3 fail-fast gates all green)."
+echo "${GUARD_NAME}: clean (default + external-Postgres + cert-manager + production hardening + 3 fail-fast gates + DEPL-003 viaHook env render all green)."

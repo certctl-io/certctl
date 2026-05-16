@@ -36,6 +36,14 @@ server:
 
   service:
     type: ClusterIP
+    # DEPL-006 closure (Sprint 3, 2026-05-16): with replicas:3, the
+    # default round-robin Service load balancing breaks login/CSRF
+    # flows because the session cookie + the CSRF token row land on
+    # different pods between requests. sessionAffinity: ClientIP
+    # routes every connection from a given source IP to the same
+    # pod for the configured timeout window. docs/operator/runbooks/ha.md
+    # documents this; pre-fix the chart did not actually render it.
+    sessionAffinity: ClientIP
     annotations:
       prometheus.io/scrape: "true"
       prometheus.io/port: "8443"
@@ -53,6 +61,14 @@ server:
   rateLimiting:
     rps: 500
     burst: 1000
+    # DEPL-006 closure (Sprint 3, 2026-05-16): replicas > 1 REQUIRES
+    # the postgres backend so per-key buckets are cross-replica-
+    # consistent. The default 'memory' backend gives each pod its
+    # own bucket map, so a 3-replica fleet effectively triples the
+    # configured cap (a client churning across pods bypasses the
+    # limit). See deploy/helm/certctl/values.yaml L217-226 for the
+    # canonical comment.
+    backend: postgres
 
 postgresql:
   enabled: true

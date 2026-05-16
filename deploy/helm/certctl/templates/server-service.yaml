@@ -11,6 +11,23 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.server.service.type }}
+  {{- /*
+    DEPL-006 closure (Sprint 3, 2026-05-16). Render the optional
+    sessionAffinity field. docs/operator/runbooks/ha.md instructs
+    operators to set sessionAffinity: ClientIP for replicas > 1 so
+    login + CSRF flows stay on the same pod; pre-fix the chart did
+    not actually pass the value through. sessionAffinityConfig
+    clientIP.timeoutSeconds renders only when set, otherwise
+    Kubernetes applies its default (10800s / 3h).
+  */}}
+  {{- if .Values.server.service.sessionAffinity }}
+  sessionAffinity: {{ .Values.server.service.sessionAffinity }}
+  {{- with .Values.server.service.sessionAffinityTimeoutSeconds }}
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ . }}
+  {{- end }}
+  {{- end }}
   ports:
     - port: {{ .Values.server.service.port }}
       targetPort: https

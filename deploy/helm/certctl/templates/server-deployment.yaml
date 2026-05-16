@@ -51,6 +51,20 @@ spec:
               containerPort: {{ .Values.server.port }}
               protocol: TCP
           env:
+            # DEPL-003 closure (Sprint 3, 2026-05-16). Pre-fix the
+            # CERTCTL_MIGRATIONS_VIA_HOOK env var was documented in
+            # values.yaml (L797-810) and migration-job.yaml comments
+            # but was never rendered into the server Deployment env
+            # block. With migrations.viaHook=true the operator's
+            # intent is "the pre-install/pre-upgrade Helm Job owns
+            # migrations" — but the server pods, missing the env,
+            # ran their own boot-time RunMigrations alongside the
+            # hook Job, racing on the schema lock. cmd/server/migrations.go
+            # only short-circuits when this env is "true" (line 144).
+            {{- if .Values.migrations.viaHook }}
+            - name: CERTCTL_MIGRATIONS_VIA_HOOK
+              value: "true"
+            {{- end }}
             - name: CERTCTL_SERVER_HOST
               value: "0.0.0.0"
             - name: CERTCTL_SERVER_PORT
