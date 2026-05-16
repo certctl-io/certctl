@@ -185,6 +185,13 @@ func (r *UserRepository) ListAll(ctx context.Context, tenantID string) ([]*userd
 // this list per tick and calls UserRetentionService.DeleteUserPII on
 // each. Cross-tenant on purpose: a single retention policy spans the
 // whole control plane.
+//
+// multi-tenant-query-coverage carve-out: the SELECT below intentionally
+// omits `tenant_id` because retention is a control-plane-wide policy
+// (one CERTCTL_USER_RETENTION_WINDOW for the whole deployment, not
+// per-tenant). Adding a `tenant_id = $N` filter would require the
+// scheduler loop to iterate every tenant, which is more code for
+// equivalent semantics. The guard's baseline counts this query.
 func (r *UserRepository) ListDeactivatedBefore(ctx context.Context, threshold time.Time) ([]*userdomain.User, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+userColumns+`

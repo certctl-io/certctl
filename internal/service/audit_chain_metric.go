@@ -88,8 +88,10 @@ func (c *AuditChainCounter) RecordBreak(brokenAtID string, brokenAtPos int) {
 	}
 }
 
-// Snapshot returns the current counter state for the Prometheus
-// exposer. Reads use atomic loads — no mutex.
+// AuditChainSnapshot is the point-in-time view of the counters the
+// Prometheus exposer reads. Snapshot() returns one of these; the
+// metrics handler renders each field into Prometheus exposition
+// format. Reads use atomic loads — no mutex required.
 type AuditChainSnapshot struct {
 	BreaksDetected uint64
 	WalksCompleted uint64

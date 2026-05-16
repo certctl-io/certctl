@@ -67,8 +67,16 @@ TARGET_DIR="${REPO_ROOT}/internal/repository/postgres"
 #
 # To rebase: re-run the guard, set BASELINE_COUNT to the new value,
 # include the rebase commit's SHA in the "last rebase" comment.
-BASELINE_COUNT=31
-# Last rebase: 2026-05-11 (Audit 2026-05-11 fix bundle dropped tenant_id-less
+BASELINE_COUNT=32
+# Last rebase: 2026-05-16 (Sprint 6 COMP-002-RETENTION added
+# UserRepository.ListDeactivatedBefore at internal/repository/postgres/user.go:191
+# — legitimately tenant-spanning by design. The scheduler's
+# userRetentionLoop walks every tenant's deactivated users on the
+# same tick; the retention policy is control-plane-wide, not
+# per-tenant. Documented inline in the SQL comment.
+#
+# Prior rebases:
+# 2026-05-11 (Audit 2026-05-11 fix bundle dropped tenant_id-less
 # queries by 1; v2.1.0 release-gate Phase 5 ratcheted baseline 32 -> 31).
 
 if [ ! -d "$TARGET_DIR" ]; then

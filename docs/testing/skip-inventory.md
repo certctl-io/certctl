@@ -8,8 +8,8 @@
 
 ## Summary
 
-- Total t.Skip sites: **144**
-- testing.Short() guards: **78** (these gate behind `go test -short`)
+- Total t.Skip sites: **147**
+- testing.Short() guards: **82** (these gate behind `go test -short`)
 
 Re-run inventory with: `./scripts/skip-inventory.sh`.
 
@@ -162,6 +162,9 @@ Re-run inventory with: `./scripts/skip-inventory.sh`.
 
 ### `internal/repository/postgres`
 
+- `internal/repository/postgres/audit_chain_test.go:137` — t.Skip("skipping integration test in short mode")
+- `internal/repository/postgres/audit_chain_test.go:36` — t.Skip("skipping integration test in short mode")
+- `internal/repository/postgres/audit_chain_test.go:58` — t.Skip("skipping integration test in short mode")
 - `internal/repository/postgres/audit_worm_test.go:29` — t.Skip("skipping integration test in short mode")
 - `internal/repository/postgres/auth_revoke_scope_test.go:118` — t.Skip("integration test in short mode")
 - `internal/repository/postgres/auth_revoke_scope_test.go:149` — t.Skip("integration test in short mode")
