@@ -264,6 +264,18 @@ services:
       CERTCTL_AUTH_TYPE: api-key
       CERTCTL_AUTH_SECRET: test-key-2026
 
+      # Phase 2 SEC-H1 + Sprint 5 RED-003 closure (2026-05-16): the
+      # AgentBootstrapTokenDenyEmpty fail-closed guard refuses to start
+      # the server when CERTCTL_AGENT_BOOTSTRAP_TOKEN is empty (the
+      # default DENY_EMPTY=true flipped on Sprint 5). Demo stacks
+      # bypass the guard via CERTCTL_DEMO_MODE_ACK=true, but this is
+      # the e2e TEST stack (production-like auth posture), not a demo
+      # stack — set a deterministic placeholder token so the server
+      # boots and the vendor-edge integration tests can run. Clearly
+      # test-only; do NOT copy to production. Operators set this from
+      # `openssl rand -base64 32` per docs/operator/security.md.
+      CERTCTL_AGENT_BOOTSTRAP_TOKEN: test-agent-bootstrap-token-deterministic-fixture
+
       # Key generation — agent-side (production-like)
       CERTCTL_KEYGEN_MODE: agent
 
