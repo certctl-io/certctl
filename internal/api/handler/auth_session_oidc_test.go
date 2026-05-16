@@ -255,6 +255,14 @@ func (s *stubUserRepo) ListAll(_ context.Context, _ string) ([]*userdomain.User,
 	return nil, nil
 }
 
+// ListDeactivatedBefore satisfies the Sprint 6 COMP-002-RETENTION
+// interface addition. The phase-5 OIDC handler tests don't exercise
+// retention paths, so an empty result keeps the contract without
+// changing test semantics.
+func (s *stubUserRepo) ListDeactivatedBefore(_ context.Context, _ time.Time) ([]*userdomain.User, error) {
+	return nil, nil
+}
+
 type phase5StubAudit struct {
 	events []string
 	// Audit 2026-05-11 Fix 13 — capture the details map so the

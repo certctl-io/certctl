@@ -1258,6 +1258,26 @@ func main() {
 	logger.Info("audit chain verify loop enabled",
 		"interval", cfg.AuditChain.VerifyInterval.String())
 
+	// Sprint 6 COMP-002-RETENTION: wire the user-PII purge loop. The
+	// service nullifies email + display_name on users whose
+	// deactivated_at exceeds the retention window (default 30d) and
+	// hashes oidc_subject to preserve audit attribution. The scheduler
+	// loop ticks on CERTCTL_USER_RETENTION_INTERVAL (default 24h).
+	userRetentionService := service.NewUserRetentionService(
+		oidcUserRepo,
+		sessionRepo,
+		auditService,
+		logger,
+		cfg.UserRetention.RetentionWindow,
+		cfg.UserRetention.BatchCap,
+	)
+	sched.SetUserRetentionPurger(userRetentionService)
+	sched.SetUserRetentionInterval(cfg.UserRetention.Interval)
+	logger.Info("user PII retention purge loop enabled",
+		"interval", cfg.UserRetention.Interval.String(),
+		"retention_window", cfg.UserRetention.RetentionWindow.String(),
+		"batch_cap", cfg.UserRetention.BatchCap)
+
 	logger.Info("session GC sweep enabled",
 		"interval", cfg.Auth.Session.GCInterval.String(),
 		"absolute_timeout", cfg.Auth.Session.AbsoluteTimeout.String(),

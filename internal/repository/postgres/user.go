@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/lib/pq"
 
@@ -164,6 +165,36 @@ func (r *UserRepository) ListAll(ctx context.Context, tenantID string) ([]*userd
 		tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("users list_all: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*userdomain.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("users scan: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// ListDeactivatedBefore returns every user (across all tenants) whose
+// deactivated_at is not NULL AND strictly before threshold. Sprint 6
+// COMP-002-RETENTION — the userRetentionLoop in the scheduler walks
+// this list per tick and calls UserRetentionService.DeleteUserPII on
+// each. Cross-tenant on purpose: a single retention policy spans the
+// whole control plane.
+func (r *UserRepository) ListDeactivatedBefore(ctx context.Context, threshold time.Time) ([]*userdomain.User, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+userColumns+`
+		   FROM users
+		  WHERE deactivated_at IS NOT NULL
+		    AND deactivated_at < $1
+		  ORDER BY deactivated_at ASC`,
+		threshold)
+	if err != nil {
+		return nil, fmt.Errorf("users list_deactivated_before: %w", err)
 	}
 	defer rows.Close()
 

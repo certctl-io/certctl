@@ -145,6 +145,16 @@ type AuditChainBreakRecorder interface {
 	RecordSuccess(rowCount int)
 }
 
+// UserRetentionPurger is the Sprint 6 COMP-002-RETENTION scheduler-side
+// interface. Concrete impl is *service.UserRetentionService — it walks
+// every user whose deactivated_at exceeds the retention window and
+// scrubs PII columns (email / display_name / oidc_subject hash). The
+// loop calls PurgeDeactivatedUsers on every CERTCTL_USER_RETENTION_INTERVAL
+// tick. nil = loop is not wired (deployments that disable retention).
+type UserRetentionPurger interface {
+	PurgeDeactivatedUsers(ctx context.Context) (purged, failed int, err error)
+}
+
 // JobReaperService defines the interface for job timeout reaping used by the scheduler.
 type JobReaperService interface {
 	ReapTimedOutJobs(ctx context.Context, csrTTL, approvalTTL time.Duration) error
@@ -175,6 +185,7 @@ type Scheduler struct {
 	rateLimitGC           RateLimitGarbageCollector
 	auditChainVerifier    AuditChainVerifier
 	auditChainRecorder    AuditChainBreakRecorder
+	userRetention         UserRetentionPurger
 	jobReaper             JobReaperService
 	logger                *slog.Logger
 
@@ -196,6 +207,7 @@ type Scheduler struct {
 	sessionGCInterval             time.Duration
 	rateLimitGCInterval           time.Duration
 	auditChainVerifyInterval      time.Duration
+	userRetentionInterval         time.Duration
 	// agentOfflineJobTTL: per-tick threshold for reaping Running jobs whose
 	// owning agent has been silent. Bundle C / Audit M-016. Defaults below.
 	agentOfflineJobTTL      time.Duration
@@ -220,6 +232,7 @@ type Scheduler struct {
 	sessionGCRunning             atomic.Bool
 	rateLimitGCRunning           atomic.Bool
 	auditChainVerifyRunning      atomic.Bool
+	userRetentionRunning         atomic.Bool
 
 	// Graceful shutdown: wait for in-flight work to complete
 	wg sync.WaitGroup
@@ -265,6 +278,11 @@ func NewScheduler(
 		// not dominate a quiet fleet's DB load. Operators with huge
 		// audit tables can lengthen via CERTCTL_AUDIT_CHAIN_VERIFY_INTERVAL.
 		auditChainVerifyInterval: 6 * time.Hour,
+		// Sprint 6 COMP-002-RETENTION: user PII purge cadence. Default
+		// 24h — deactivated rows persist past the retention window
+		// (default 30d) only until the next tick, which is fine for
+		// GDPR-style "delete within reasonable time" expectations.
+		userRetentionInterval: 24 * time.Hour,
 		// 5 minutes is 5×agentHealthCheckInterval default of 1m; an agent
 		// must miss multiple heartbeats before its in-flight jobs are reaped.
 		agentOfflineJobTTL: 5 * time.Minute,
@@ -469,6 +487,25 @@ func (s *Scheduler) SetAuditChainVerifyInterval(d time.Duration) {
 	s.auditChainVerifyInterval = d
 }
 
+// SetUserRetentionPurger wires the Sprint 6 COMP-002-RETENTION
+// user-PII-purge sweeper. Optional — nil disables the loop (deployments
+// that don't have any federated humans yet, or those that want manual
+// purge via the admin endpoint only). Concrete impl is
+// *service.UserRetentionService.
+func (s *Scheduler) SetUserRetentionPurger(p UserRetentionPurger) {
+	s.userRetention = p
+}
+
+// SetUserRetentionInterval configures the userRetentionLoop tick
+// cadence. Default 24h. Wire: CERTCTL_USER_RETENTION_INTERVAL.
+// Zero or negative values are ignored.
+func (s *Scheduler) SetUserRetentionInterval(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.userRetentionInterval = d
+}
+
 // SetAgentOfflineJobTTL sets the threshold past which a Running job whose
 // owning agent has gone silent is reaped to Failed. Bundle C / Audit M-016.
 // Zero or negative values are ignored (the default of 5 minutes is kept).
@@ -536,6 +573,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		if s.auditChainVerifier != nil {
 			loopCount++
 		}
+		if s.userRetention != nil {
+			loopCount++
+		}
 		s.wg.Add(loopCount)
 
 		go func() { defer s.wg.Done(); s.renewalCheckLoop(ctx) }()
@@ -572,6 +612,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		}
 		if s.auditChainVerifier != nil {
 			go func() { defer s.wg.Done(); s.auditChainVerifyLoop(ctx) }()
+		}
+		if s.userRetention != nil {
+			go func() { defer s.wg.Done(); s.userRetentionLoop(ctx) }()
 		}
 
 		// Signal that all loops are launched
@@ -1450,6 +1493,50 @@ func (s *Scheduler) auditChainVerifyLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.runAuditChainVerify(ctx)
+		}
+	}
+}
+
+// userRetentionLoop is the Sprint 6 COMP-002-RETENTION sweeper. Every
+// CERTCTL_USER_RETENTION_INTERVAL tick it asks
+// UserRetentionService.PurgeDeactivatedUsers to walk every user whose
+// deactivated_at is older than the retention window and scrub the PII
+// columns. The service is responsible for the row-level work + audit
+// emission; the loop only orchestrates cadence + concurrency control.
+//
+// Mirrors the GC-loop pattern: atomic.Bool guard prevents overlapping
+// ticks; per-tick context.WithTimeout caps the worst case at 5
+// minutes. The retention service's purgeBatchCap (default 200) is the
+// inner-loop budget — large backlogs spread across multiple ticks.
+func (s *Scheduler) userRetentionLoop(ctx context.Context) {
+	ticker := NewJitteredTicker(s.userRetentionInterval, DefaultSchedulerJitter)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.userRetentionRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("user retention purge still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.userRetentionRunning.Store(false)
+				opCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				defer cancel()
+				purged, failed, err := s.userRetention.PurgeDeactivatedUsers(opCtx)
+				if err != nil {
+					s.logger.Warn("user retention purge failed (next tick will retry)", "error", err)
+					return
+				}
+				if purged > 0 || failed > 0 {
+					s.logger.Info("user retention purge tick",
+						"purged", purged, "failed", failed)
+				}
+			}()
 		}
 	}
 }

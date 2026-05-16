@@ -6,6 +6,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	userdomain "github.com/certctl-io/certctl/internal/auth/user/domain"
 )
@@ -46,4 +47,12 @@ type UserRepository interface {
 	// ListAll returns every user in the tenant. Order:
 	// created_at ASC. Used by the GUI's admin surface.
 	ListAll(ctx context.Context, tenantID string) ([]*userdomain.User, error)
+
+	// ListDeactivatedBefore returns every user whose deactivated_at is
+	// not NULL AND strictly before the supplied threshold. Sprint 6
+	// COMP-002-RETENTION closure — the scheduler's userRetentionLoop
+	// uses this to enumerate purge-eligible rows on each tick. Order:
+	// deactivated_at ASC (oldest first, so a tick-budget cap is
+	// deterministic about which rows it processes).
+	ListDeactivatedBefore(ctx context.Context, threshold time.Time) ([]*userdomain.User, error)
 }

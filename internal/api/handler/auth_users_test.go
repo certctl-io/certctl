@@ -83,6 +83,20 @@ func (s *stubFullUserRepo) ListAll(_ context.Context, tenantID string) ([]*userd
 	return out, nil
 }
 
+// ListDeactivatedBefore satisfies the Sprint 6 COMP-002-RETENTION
+// interface addition. Walk rows, filter by DeactivatedAt-before-threshold.
+// Order is intentionally not stabilised — the auth_users handler tests
+// don't exercise the retention loop.
+func (s *stubFullUserRepo) ListDeactivatedBefore(_ context.Context, threshold time.Time) ([]*userdomain.User, error) {
+	var out []*userdomain.User
+	for _, u := range s.rows {
+		if u.DeactivatedAt != nil && u.DeactivatedAt.Before(threshold) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
 // stubRevoker records cascade-revoke calls.
 type stubRevoker struct {
 	called    bool

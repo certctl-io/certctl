@@ -392,6 +392,20 @@ func (s *stubUsers) ListAll(_ context.Context, _ string) ([]*userdomain.User, er
 	return out, nil
 }
 
+// ListDeactivatedBefore satisfies the Sprint 6 COMP-002-RETENTION
+// interface addition. Stub-side: walk byID and filter on the
+// DeactivatedAt cursor; OIDC service tests don't care about ordering
+// stability.
+func (s *stubUsers) ListDeactivatedBefore(_ context.Context, threshold time.Time) ([]*userdomain.User, error) {
+	var out []*userdomain.User
+	for _, u := range s.byID {
+		if u.DeactivatedAt != nil && u.DeactivatedAt.Before(threshold) {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
 type stubSessions struct {
 	cookieValue string
 	csrfToken   string

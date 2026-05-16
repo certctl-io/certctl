@@ -108,6 +108,10 @@ type Config struct {
 	// cadence. Scheduler loop auditChainVerifyLoop reads VerifyInterval;
 	// the metric-side counter is wired separately in cmd/server/main.go.
 	AuditChain AuditChainConfig
+	// UserRetention holds the Sprint 6 COMP-002-RETENTION purge cadence
+	// + window. The scheduler's userRetentionLoop reads Interval; the
+	// UserRetentionService reads RetentionWindow + BatchCap.
+	UserRetention UserRetentionConfig
 }
 
 // AuditChainConfig configures the audit_events tamper-evidence
@@ -126,6 +130,26 @@ type AuditChainConfig struct {
 	VerifyInterval time.Duration
 }
 
+// UserRetentionConfig configures the Sprint 6 COMP-002-RETENTION user
+// PII purge sweeper. The scheduler's userRetentionLoop walks every
+// user with deactivated_at older than RetentionWindow and scrubs the
+// PII columns via UserRetentionService.DeleteUserPII.
+type UserRetentionConfig struct {
+	// Interval is the tick cadence. Default 24h.
+	// Setting: CERTCTL_USER_RETENTION_INTERVAL.
+	Interval time.Duration
+	// RetentionWindow is how long after deactivated_at a row's PII
+	// stays in the table. Default 30 days. Operators with strict
+	// GDPR / CCPA expectations may shorten; operators who need
+	// forensic recovery latitude may lengthen.
+	// Setting: CERTCTL_USER_RETENTION_WINDOW.
+	RetentionWindow time.Duration
+	// BatchCap bounds how many users a single tick processes. Default
+	// 200 — keeps blast radius predictable. Set to 0 to disable the
+	// cap (test fixtures only).
+	// Setting: CERTCTL_USER_RETENTION_BATCH_CAP.
+	BatchCap int
+}
 
 // OCSPResponderConfig configures the dedicated OCSP-responder cert
 // per issuer (RFC 6960 §2.6 + §4.2.2.2). When unset, the local issuer
@@ -723,6 +747,11 @@ func Load() (*Config, error) {
 		},
 		AuditChain: AuditChainConfig{
 			VerifyInterval: getEnvDuration("CERTCTL_AUDIT_CHAIN_VERIFY_INTERVAL", 6*time.Hour),
+		},
+		UserRetention: UserRetentionConfig{
+			Interval:        getEnvDuration("CERTCTL_USER_RETENTION_INTERVAL", 24*time.Hour),
+			RetentionWindow: getEnvDuration("CERTCTL_USER_RETENTION_WINDOW", 30*24*time.Hour),
+			BatchCap:        getEnvInt("CERTCTL_USER_RETENTION_BATCH_CAP", 200),
 		},
 	}
 
