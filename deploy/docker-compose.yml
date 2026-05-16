@@ -145,8 +145,18 @@ services:
       # default for screenshot/demo use; production deploys never
       # depend on that fallback.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Acquisition-audit SEC-014 closure (Sprint 2, 2026-05-16). Bind
+    # the published port to 127.0.0.1 ONLY — the certctl-server
+    # connection comes in via the `certctl-network` Docker network
+    # (the host-port mapping is operator convenience for psql / DB
+    # inspection only). Pre-fix, the "5432:5432" form bound on
+    # 0.0.0.0, exposing the Postgres TCP listener on every interface
+    # of any host that happened to be on a public IP. The loopback
+    # bind keeps host-side psql access working while preventing the
+    # cross-network exposure landmine for compose deploys that aren't
+    # behind a firewall.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
