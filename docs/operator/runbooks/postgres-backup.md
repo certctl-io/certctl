@@ -1,6 +1,6 @@
 # Runbook: PostgreSQL backup for certctl
 
-> Last reviewed: 2026-05-16
+> Last reviewed: 2026-05-16 (Sprint 4 ACQ — CI restore verification subsection added)
 
 Use this when:
 - You're setting up a new certctl deployment and need a backup policy
@@ -197,6 +197,42 @@ to your quarterly on-call rotation:
 
 The [disaster-recovery runbook](disaster-recovery.md) covers what to
 do when this dry-run reveals a gap.
+
+## CI restore verification
+
+> Acquisition-audit DEPL-005 + DATA-012 closure (Sprint 4 ACQ,
+> 2026-05-16). The quarterly dry-run above is the operator-side
+> proof; the workflow below is the upstream-side proof.
+
+The certctl repo ships a weekly GitHub Actions workflow that
+exercises the **exact** pg_dump shape this runbook recommends
+(`--format=custom --no-owner --no-acl`) against a real Postgres
+container, then asserts the audit_events hash chain round-trips
+byte-for-byte across the dump → restore boundary. A regression in
+the dump format, in a Postgres minor bump, or in migration 000047's
+canonical-payload serialization would surface in the next Monday
+run instead of on a customer's restore day.
+
+- **Workflow:** [`.github/workflows/backup-restore.yml`](../../../.github/workflows/backup-restore.yml)
+  — Mondays 07:00 UTC + `workflow_dispatch`. Postgres service
+  container pinned to the same SHA256 digest as
+  `deploy/docker-compose.yml`.
+- **Harness:** [`deploy/test/backup-restore-smoke.sh`](../../../deploy/test/backup-restore-smoke.sh)
+  — runs the workload → `pg_dump -Fc` → `DROP SCHEMA public CASCADE`
+  → `pg_restore` → verify cycle. Locally runnable against any
+  reachable Postgres (it DROPs the schema, so do not point it at
+  data you care about).
+- **Workload + verifier:** [`deploy/test/backupsmoke/main.go`](../../../deploy/test/backupsmoke/main.go)
+  — generates 24 synthetic `audit_events` rows representing an
+  issue/renew/revoke/auth-login cycle, snapshots the chain head
+  before the backup, and after restore runs
+  `audit_events_verify_chain()` to confirm `first_break_id IS NULL`.
+
+The CI workflow is not a replacement for the quarterly operator
+dry-run — it does not exercise the operator-managed file material
+(CA keys, RA keys, trust anchors) listed in the "What to back up"
+table above. Treat it as the dump-shape regression test; the
+quarterly run remains the full-restore correctness test.
 
 ## Related reading
 

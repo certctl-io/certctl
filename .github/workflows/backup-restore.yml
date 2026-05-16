@@ -1,0 +1,118 @@
+# Acquisition-audit DEPL-005 + DATA-012 closure (Sprint 4 ACQ,
+# 2026-05-16). Weekly backup-restore smoke test.
+#
+# Why
+# ===
+# The Helm CronJob at deploy/helm/certctl/templates/backup-cronjob.yaml
+# and the operator runbook at docs/operator/runbooks/postgres-backup.md
+# both document a pg_dump -Fc -based backup strategy, but the dump has
+# never been restored end-to-end under CI. A backup procedure that has
+# never been restore-tested is not a backup procedure. This workflow
+# adds the missing assertion.
+#
+# What
+# ====
+# Each Monday at 07:00 UTC (1h offset from loadtest.yml's 06:00 UTC
+# slot so they don't fight for runners), boot a real Postgres
+# 16-alpine container against the same digest pin as the production
+# deploy/docker-compose.yml, exercise the audit_events hash chain
+# with a small synthetic workload, pg_dump the database, drop the
+# schema, pg_restore, and assert the chain head + row count
+# round-trip byte-for-byte.
+#
+# The chain head round-trip property is the load-bearing assertion.
+# Migration 000047 hashes each audit_events row's canonical payload
+# with `to_char(timestamp AT TIME ZONE 'UTC',
+# 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`. Any TIMESTAMPTZ-precision loss
+# in the dump→restore path (a real concern across major Postgres
+# upgrades or with --format=plain) would corrupt the hash. The whole
+# point of testing instead of trusting docs is to PROVE the property
+# under a real workload.
+#
+# Workflow boundaries
+# ===================
+# - Does not exercise PITR / WAL archiving (DR runbook owns that).
+# - Does not exercise the Helm CronJob's S3 sink or scheduling
+#   (operator-side concern, not a property of the dump shape).
+# - Does not deploy or boot the certctl-server itself — the smoke
+#   harness talks to Postgres directly; we're testing the dump,
+#   not the server.
+
+name: backup-restore-smoke
+
+on:
+  # Manual trigger from the Actions tab — useful before tagging a
+  # release that touches the audit_events schema, or after a dep
+  # bump that could affect canonical-payload formatting.
+  workflow_dispatch:
+
+  schedule:
+    # Mondays at 07:00 UTC. Off-peak, off-set 1h from loadtest.yml
+    # (06:00 UTC) so the two jobs don't fight for runners on the
+    # GitHub-hosted ubuntu-latest pool.
+    - cron: '0 7 * * 1'
+
+# Defense-in-depth: this job reads source and exercises a database;
+# it never needs write access to PRs, branches, releases, or
+# packages. Pin permissions to the minimum.
+permissions:
+  contents: read
+
+jobs:
+  backup-restore:
+    name: pg_dump / pg_restore smoke
+    runs-on: ubuntu-latest
+
+    # 15-minute hard cap. The actual workload + dump + restore + verify
+    # cycle runs in well under a minute on a warm runner; 15 minutes
+    # absorbs cold image pulls, slow runner provisioning, and the
+    # Postgres service-container readiness wait without letting a stuck
+    # job consume the runner indefinitely.
+    timeout-minutes: 15
+
+    # Postgres service container. Pin to the same digest as
+    # deploy/docker-compose.yml so the smoke runs against the exact
+    # image the production deploy uses — a regression that surfaces
+    # only on a specific Postgres minor bump shows up here on the
+    # next image refresh in compose, not silently on a customer site.
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:890480b08124ce7f79960a9bb16fe39729aa302bd384bfd7c408fee6c8f7adb7
+        env:
+          POSTGRES_DB: certctl
+          POSTGRES_USER: certctl
+          POSTGRES_PASSWORD: certctl
+        ports:
+          - 5432:5432
+        # GitHub's services-container health check. The smoke shell
+        # also waits for pg_isready as a belt-and-suspenders guard.
+        options: >-
+          --health-cmd "pg_isready -U certctl -d certctl"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5
+        with:
+          go-version: '1.25.10'
+          # Cache go-build + go-mod for the weekly run. Keep the
+          # cache key bound to go.sum so a dep bump invalidates it.
+          cache: true
+
+      - name: Run backup-restore smoke
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: certctl
+          PGPASSWORD: certctl
+          PGDATABASE: certctl
+          # Insert enough rows to exercise the chain over a non-trivial
+          # length. 24 ≫ 1 — large enough to surface ordering bugs,
+          # small enough that the dump finishes in seconds.
+          SMOKE_ROWS: '24'
+        run: bash deploy/test/backup-restore-smoke.sh
