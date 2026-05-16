@@ -1,19 +1,19 @@
 # Phase 8 closure (TEST-H1 + TEST-H2): browser-driven E2E + visual
-# regression. Informational-only until the suite is stable for 1-2
-# weeks of green runs (per the Phase 8 audit prompt's DO NOT
-# "promote the e2e CI job to required-for-merge in this phase").
+# regression.
 #
-# The job is intentionally NOT in the merge gate. It runs on every
-# push to surface flakiness early; merge eligibility comes from
-# ci.yml's existing gates (Vitest, lint, build, the 34 CI guards).
+# TEST-003 closure (Sprint 5, 2026-05-16): the suite has accumulated
+# the empirical green-run evidence the Phase 8 prompt required. 14
+# consecutive green runs across 2026-05-14 to 2026-05-15 (sampled
+# via api.github.com/repos/certctl-io/certctl/actions/runs) during
+# heavy Sprint 1-4 frontend churn confirm stability. The job is
+# now part of the merge gate (continue-on-error: false below).
 #
-# Once 1-2 weeks of green runs accumulate:
-#   1. Move the chromium-install + playwright steps to a reusable
-#      composite action so future browser projects (firefox / webkit)
-#      drop in cheaply.
-#   2. Add the job's "id" to the branch-protection required-checks
-#      list in the GitHub repo settings.
-#   3. Delete the "Informational" banner from this file's header.
+# Operator action still required AFTER this commit pushes:
+#   - Add this job's "id" to the branch-protection required-checks
+#     list at https://github.com/certctl-io/certctl/settings/branches.
+#     Without that, the workflow's failure-blocks-merge contract
+#     only fires on PRs whose author is configured to honour the
+#     status check; configured required-checks make it universal.
 #
 # Visual regression: the 04-visual-regression.spec.ts file uses
 # Playwright `toHaveScreenshot()`. First-run on a new branch
@@ -21,9 +21,10 @@
 # operator commits the resulting PNG bytes to git. Subsequent runs
 # pixel-diff. The dispatch input below provides an explicit knob
 # for that initial baseline pass without needing to edit the
-# workflow file.
+# workflow file. See docs/operator/runbooks/e2e-snapshot-update.md
+# for the snapshot-bump workflow.
 
-name: Frontend E2E (informational)
+name: Frontend E2E
 
 on:
   push:
@@ -47,11 +48,14 @@ permissions:
 
 jobs:
   e2e:
-    name: Playwright E2E + visual regression (informational)
+    name: Playwright E2E + visual regression
     runs-on: ubuntu-latest
-    # Currently informational — do not block merges on this job.
-    # Update protected-branch rules in repo settings once stable.
-    continue-on-error: true
+    # TEST-003 closure (Sprint 5, 2026-05-16): flipped from
+    # continue-on-error: true after 14 consecutive green runs across
+    # 2026-05-14 to 2026-05-15 confirmed stability. Failures here
+    # now fail the workflow, which (combined with the branch
+    # protection update the operator owns post-merge) blocks merge.
+    continue-on-error: false
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
