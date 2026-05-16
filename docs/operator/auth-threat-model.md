@@ -300,6 +300,64 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
   attacks where an attacker captures a logout JWT and replays it.
 - **Cache-Control: no-store** on the response per spec §2.5.
 
+### Userinfo + BCL SSRF parity (post-SEC-001 follow-up)
+
+The original SEC-001 closure (Sprint 1, 2026-05-16) routed two OIDC
+discovery legs — `test_discovery.go` dry-run and `service.go` runtime
+provider load — through `validation.SafeHTTPDialContext` via the
+`SafeOIDCContext(ctx)` helper at
+[`internal/auth/oidc/safehttp.go`](../../internal/auth/oidc/safehttp.go).
+The acquisition-audit follow-up (2026-05-16) flagged two adjacent
+call sites the sweep missed; both are now wrapped identically.
+
+- **SEC-020 — Userinfo fallback (`fetchUserinfoGroups`).**
+  `internal/auth/oidc/service.go` previously called
+  `entry.provider.UserInfo(ctx, ts)` with the bare request context
+  on the userinfo-fallback leg (operator opt-in when an IdP doesn't
+  surface groups in the ID token). go-oidc/v3's `Provider.UserInfo`
+  derives its `http.Client` from `ctx` via `getClient(ctx)`
+  (`oidc.go:61-65`); without an override the internal `doRequest`
+  falls through to `http.DefaultClient` — no SSRF guard, no DNS-
+  rebinding re-resolve at dial time. An IdP whose discovery doc
+  advertises a `userinfo_endpoint` pointing at a reserved address
+  (loopback, cloud-metadata `169.254.169.254`, RFC 1918) would
+  trigger an unguarded egress at userinfo-fetch time. Fixed by
+  wrapping `ctx` via `SafeOIDCContext(ctx)` before both
+  `oauthConfig.TokenSource` and `provider.UserInfo`. Pinned by
+  `TestFetchUserinfoGroups_SSRF_BlocksReservedAddress`.
+
+- **SEC-021 — Back-channel logout discovery re-fetch.**
+  `internal/api/handler/auth_session_oidc_bcl.go::Verify` performs
+  a per-request `gooidc.NewProvider(ctx, matched.IssuerURL)` to
+  fetch the JWKS for verifying the BCL token's signature. Same
+  bare-ctx shape — an IdP whose registered `IssuerURL` resolves to
+  a reserved address (or that is rebinding to one at logout time)
+  would dial an unguarded HTTPS egress. Fixed by wrapping via
+  `oidcsvc.SafeOIDCContext(ctx)` before `NewProvider`. Pinned by
+  `TestDefaultBCLVerifier_SSRF_BlocksReservedAddress`.
+
+- **Context-key shape (why a single wrap covers both legs).**
+  `gooidc.ClientContext` is implemented as
+  `context.WithValue(ctx, oauth2.HTTPClient, client)` (go-oidc
+  v3.18.0 `oidc.go:57-59`). Both go-oidc's `getClient` AND
+  `golang.org/x/oauth2`'s `internal.ContextClient` read the same
+  `oauth2.HTTPClient` key. So the single `SafeOIDCContext` wrap
+  covers go-oidc-driven HTTP (Provider.UserInfo, NewProvider
+  discovery, Verifier JWKS) AND oauth2-driven HTTP
+  (Config.TokenSource refresh, Config.Exchange). No additional
+  `context.WithValue(ctx, oauth2.HTTPClient, ...)` is required.
+
+- **Out-of-scope: RFC 1918.** Per the `IsReservedIP` policy
+  documented at [`internal/validation/ssrf.go:15-32`](../../internal/validation/ssrf.go),
+  RFC 1918 ranges are NOT treated as reserved by the SSRF guard.
+  certctl is designed to manage certificates inside private
+  networks; filtering 10/8 + 172.16/12 + 192.168/16 would break
+  the primary use case. Operators on hosted IaaS who want
+  RFC 1918 treated as reserved can opt in via the future
+  `CERTCTL_BLOCK_RFC1918_OUTBOUND` toggle (see acquisition-audit
+  Sprint 5 RED-005). The Sprint 1 SSRF parity fix above closes
+  the loopback / link-local / cloud-metadata leg only.
+
 ### OIDC first-admin bootstrap
 
 - **Coexists with the env-var-token bootstrap path.** Both can be

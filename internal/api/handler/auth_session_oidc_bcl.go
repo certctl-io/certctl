@@ -14,6 +14,7 @@ import (
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
 
+	oidcsvc "github.com/certctl-io/certctl/internal/auth/oidc"
 	oidcdomain "github.com/certctl-io/certctl/internal/auth/oidc/domain"
 	"github.com/certctl-io/certctl/internal/repository"
 )
@@ -122,7 +123,13 @@ func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (is
 	if v.verifyOverride != nil {
 		idToken, err = v.verifyOverride(ctx, matched.IssuerURL, logoutToken)
 	} else {
-		provider, perr := gooidc.NewProvider(ctx, matched.IssuerURL)
+		// Acquisition-audit SEC-021 closure (Sprint 1 follow-up to SEC-001,
+		// 2026-05-16). Per-request discovery re-fetch threaded through
+		// SafeOIDCContext so the dial-time SSRF guard
+		// (validation.SafeHTTPDialContext) re-resolves the issuer host and
+		// refuses reserved-address answers — matching the SEC-001 sweep
+		// over the runtime + dry-run discovery legs in internal/auth/oidc.
+		provider, perr := gooidc.NewProvider(oidcsvc.SafeOIDCContext(ctx), matched.IssuerURL)
 		if perr != nil {
 			return "", "", "", "", 0, fmt.Errorf("provider discovery: %w", perr)
 		}
