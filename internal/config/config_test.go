@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -2118,5 +2119,110 @@ func TestValidate_AgentKeygenIgnoresDemoAck(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate(KeygenMode=agent, DemoAck=false) = %v; want nil (production default must boot)", err)
+	}
+}
+
+// newBufferLogger returns a slog.Logger that writes JSON records into the
+// returned buffer, suitable for asserting WARN emission from
+// warnExternalSslmodeDisable. SEC-013 closure (Sprint 2 ACQ).
+func newBufferLogger() (*slog.Logger, *bytes.Buffer) {
+	var buf bytes.Buffer
+	h := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(h), &buf
+}
+
+// TestWarnExternalSslmodeDisable_FiresOnExternalHost asserts an external
+// host (e.g. RDS) + sslmode=disable produces a WARN. SEC-013 closure
+// (Sprint 2 ACQ, 2026-05-16). The advisory exists to surface the
+// real-world landmine: an operator who points CERTCTL_DATABASE_URL at a
+// managed-Postgres host outside the bridge network without flipping
+// sslmode to verify-full.
+func TestWarnExternalSslmodeDisable_FiresOnExternalHost(t *testing.T) {
+	t.Parallel()
+	logger, buf := newBufferLogger()
+	warnExternalSslmodeDisable("postgres://certctl:secret@db.internal.example.com:5432/certctl?sslmode=disable", logger)
+
+	out := buf.String()
+	if !strings.Contains(out, `"level":"WARN"`) {
+		t.Fatalf("expected a WARN record, got: %s", out)
+	}
+	if !strings.Contains(out, "db.internal.example.com") {
+		t.Errorf("WARN should include the external host in structured fields; got: %s", out)
+	}
+	if !strings.Contains(out, "sslmode") {
+		t.Errorf("WARN should include the sslmode structured field; got: %s", out)
+	}
+}
+
+// TestWarnExternalSslmodeDisable_QuietForLocalSafelist asserts the
+// loopback + in-cluster service-name conventions stay silent. These are
+// the legitimate sslmode=disable callers — compose bridge network
+// (`postgres` / `certctl-postgres`), localhost dev loops, and K8s
+// in-cluster service names (`*.svc.cluster.local`). SEC-013 closure.
+func TestWarnExternalSslmodeDisable_QuietForLocalSafelist(t *testing.T) {
+	t.Parallel()
+	silentHosts := []string{
+		"postgres://certctl@localhost:5432/certctl?sslmode=disable",
+		"postgres://certctl@127.0.0.1:5432/certctl?sslmode=disable",
+		"postgres://certctl@[::1]:5432/certctl?sslmode=disable",
+		"postgres://certctl@postgres:5432/certctl?sslmode=disable",
+		"postgres://certctl@certctl-postgres:5432/certctl?sslmode=disable",
+		"postgres://certctl@certctl-postgres.certctl.svc.cluster.local:5432/certctl?sslmode=disable",
+	}
+	for _, url := range silentHosts {
+		url := url
+		t.Run(url, func(t *testing.T) {
+			t.Parallel()
+			logger, buf := newBufferLogger()
+			warnExternalSslmodeDisable(url, logger)
+			if buf.Len() != 0 {
+				t.Errorf("expected silence for safelisted host (%s); got: %s", url, buf.String())
+			}
+		})
+	}
+}
+
+// TestWarnExternalSslmodeDisable_QuietWithoutDisable asserts that any
+// sslmode other than `disable` (the production-grade modes) stays
+// silent even with an external host. SEC-013 closure.
+func TestWarnExternalSslmodeDisable_QuietWithoutDisable(t *testing.T) {
+	t.Parallel()
+	for _, url := range []string{
+		"postgres://certctl@db.internal.example.com:5432/certctl?sslmode=verify-full&sslrootcert=/etc/ssl/ca.pem",
+		"postgres://certctl@db.internal.example.com:5432/certctl?sslmode=require",
+		"postgres://certctl@db.internal.example.com:5432/certctl", // no sslmode at all
+	} {
+		url := url
+		t.Run(url, func(t *testing.T) {
+			t.Parallel()
+			logger, buf := newBufferLogger()
+			warnExternalSslmodeDisable(url, logger)
+			if buf.Len() != 0 {
+				t.Errorf("expected silence for non-disable sslmode (%s); got: %s", url, buf.String())
+			}
+		})
+	}
+}
+
+// TestWarnExternalSslmodeDisable_QuietOnUnparseableOrEmpty asserts the
+// helper is permissive on garbage input — downstream sql.Open surfaces
+// the real parse error; the SEC-013 advisory must not become a noisy
+// hot path. SEC-013 closure.
+func TestWarnExternalSslmodeDisable_QuietOnUnparseableOrEmpty(t *testing.T) {
+	t.Parallel()
+	for _, url := range []string{
+		"",
+		"not-a-url",
+		"mysql://certctl@db:3306/x?sslmode=disable", // non-postgres scheme
+	} {
+		url := url
+		t.Run(url, func(t *testing.T) {
+			t.Parallel()
+			logger, buf := newBufferLogger()
+			warnExternalSslmodeDisable(url, logger)
+			if buf.Len() != 0 {
+				t.Errorf("expected silence for unparseable/non-postgres input (%q); got: %s", url, buf.String())
+			}
+		})
 	}
 }

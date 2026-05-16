@@ -58,7 +58,55 @@ For certificates issued to systems where revocation correctness matters:
 
 ## Postgres transport encryption
 
-See [docs/database-tls.md](database-tls.md).
+**Audit references:** SEC-013 (advisory) and SEC-014 (host-port bind),
+both closed in Sprint 2 of the 2026-Q2 acquisition audit
+(2026-05-16).
+
+The full upgrade procedure (sslmode flags, CA bundle paths, Helm chart
+values, AWS RDS / Google Cloud SQL / Azure Database notes) lives at
+[docs/operator/database-tls.md](database-tls.md). The summary of the
+two operator-visible defenses certctl ships:
+
+### SEC-014 — Postgres host port is loopback-only
+
+`deploy/docker-compose.yml` and `deploy/docker-compose.test.yml` both
+publish Postgres on `127.0.0.1:5432:5432` rather than `5432:5432`.
+The default Docker port-binding behavior is to bind to `0.0.0.0`,
+which exposes Postgres on every interface of the host — including any
+public-facing NICs the operator did not realize were attached. The
+loopback bind closes that footgun without breaking the
+certctl-server hop (which goes over the `certctl-network` Docker
+bridge, not over the host port).
+
+Operators who genuinely need to reach Postgres from another host —
+e.g. a separate metrics box running `postgres_exporter` — should
+either (1) attach that host into the same Docker network, (2) tunnel
+through SSH (`ssh -L`), or (3) re-publish the port with explicit
+`bind:` configuration and a documented network-layer access control.
+Loosening the loopback bind without one of those is a regression.
+
+### SEC-013 — advisory WARN on external `sslmode=disable`
+
+`internal/config/config.go::Validate` emits an `slog.Warn` (NOT a
+fail-closed error) when `CERTCTL_DATABASE_URL` parses as a Postgres
+URL with `sslmode=disable` AND the host is outside the local
+safelist (`localhost` / `127.0.0.1` / `::1` / `postgres` /
+`certctl-postgres` / `*.svc.cluster.local`). The advisory exists
+because the legitimate compose / Helm topology genuinely uses
+`sslmode=disable` over the Docker bridge — failing closed would
+break the production-shaped quickstart — but pointing
+`CERTCTL_DATABASE_URL` at a managed-Postgres host (RDS, Cloud SQL,
+Azure Database) without flipping `sslmode` to `verify-full` puts
+the entire control plane's Postgres traffic on the wire in
+cleartext. The WARN surfaces that landmine on every boot so the
+operator notices it in the journal even if the rest of the boot
+sequence looks healthy.
+
+To clear the WARN: set `CERTCTL_DATABASE_URL` to a URL with
+`sslmode=verify-full` and `sslrootcert=<ca-bundle-path>`. The full
+procedure (CA-bundle materialization, Helm chart values, secret-
+manager wiring) is in
+[docs/operator/database-tls.md](database-tls.md).
 
 ## Encryption at rest
 

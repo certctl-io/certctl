@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -1348,7 +1349,76 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("awaiting approval timeout must be at least 1 second")
 	}
 
+	// Acquisition-audit SEC-013 closure (Sprint 2, 2026-05-16).
+	// Post-validate advisory WARN — NOT fail-closed — when
+	// CERTCTL_DATABASE_URL carries sslmode=disable AND the host is
+	// external (not loopback / not a known in-cluster service name).
+	// The compose bridge network legitimately uses sslmode=disable on
+	// the docker-internal hop to postgres:5432; failing closed would
+	// break the production-shaped quickstart. The WARN catches the
+	// real-world landmine: an operator who points CERTCTL_DATABASE_URL
+	// at an RDS / managed-Postgres host outside the bridge network
+	// without flipping sslmode to verify-full.
+	warnExternalSslmodeDisable(c.Database.URL, slog.Default())
+
 	return nil
+}
+
+// dbHostLocalSafelist is the set of hosts where sslmode=disable is an
+// acceptable default (loopback + in-cluster service-name conventions).
+// SEC-013 closure (Sprint 2 ACQ, 2026-05-16). Match is exact host
+// equality except for the .svc.cluster.local suffix which is a
+// substring match. Adding entries here is an operator-judgment call;
+// keep the list tight (a too-permissive list silences a real
+// landmine warning).
+var dbHostLocalSafelist = map[string]struct{}{
+	"localhost":        {},
+	"127.0.0.1":        {},
+	"::1":              {},
+	"postgres":         {},
+	"certctl-postgres": {},
+}
+
+// warnExternalSslmodeDisable emits an slog.Warn (matching the
+// cmd/server/main.go demo-mode WARN shape) when the database URL
+// parses as a Postgres URL with sslmode=disable AND the host is
+// outside the local-safelist. The function is intentionally
+// permissive on parse failures — if the URL is malformed, the
+// downstream sql.Open will surface a clearer error than a noisy
+// WARN here would. SEC-013 closure (Sprint 2 ACQ).
+func warnExternalSslmodeDisable(rawURL string, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if rawURL == "" {
+		return
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u == nil {
+		return
+	}
+	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		return
+	}
+	q := u.Query()
+	if q.Get("sslmode") != "disable" {
+		return
+	}
+	host := u.Hostname()
+	if _, ok := dbHostLocalSafelist[host]; ok {
+		return
+	}
+	// In-cluster service names of the form <name>.svc.cluster.local
+	// (or longer K8s cluster-domain variants) are acceptable; the
+	// docker-bridge / pod-network hop is treated as trusted by the
+	// existing compose + Helm conventions.
+	if strings.HasSuffix(host, ".svc.cluster.local") {
+		return
+	}
+	logger.Warn("CERTCTL_DATABASE_URL points at a non-local Postgres host with sslmode=disable — Postgres traffic crosses an untrusted network in cleartext. Set sslmode=verify-full and provide a CA bundle. See docs/operator/database-tls.md for the full upgrade procedure. Override env var: CERTCTL_DATABASE_URL (set the URL with sslmode=verify-full + sslrootcert=<ca-path>).",
+		"host", host,
+		"sslmode", "disable",
+	)
 }
 
 // getEnv reads a string environment variable with the given key and default value.
