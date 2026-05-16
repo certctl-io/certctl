@@ -825,6 +825,13 @@ func (m *mockAuditRepository) List(ctx context.Context, filter *repository.Audit
 	return m.events, nil
 }
 
+// VerifyHashChain is the Sprint 6 COMP-001-HASH interface addition.
+// In-memory mock: report "clean walk over N events"; real chain
+// semantics are pinned by internal/repository/postgres/audit_chain_test.go.
+func (m *mockAuditRepository) VerifyHashChain(ctx context.Context) (string, int, int, error) {
+	return "", -1, len(m.events), nil
+}
+
 type mockAgentRepository struct {
 	agents map[string]*domain.Agent
 }

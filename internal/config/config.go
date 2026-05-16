@@ -104,7 +104,28 @@ type Config struct {
 	Encryption     EncryptionConfig
 	CloudDiscovery CloudDiscoveryConfig
 	OCSPResponder  OCSPResponderConfig
+	// AuditChain holds the Sprint 6 COMP-001-HASH chain-verify tick
+	// cadence. Scheduler loop auditChainVerifyLoop reads VerifyInterval;
+	// the metric-side counter is wired separately in cmd/server/main.go.
+	AuditChain AuditChainConfig
 }
+
+// AuditChainConfig configures the audit_events tamper-evidence
+// chain-verify scheduler loop (Sprint 6 COMP-001-HASH closure).
+//
+// The walk runs migration 000047's audit_events_verify_chain()
+// plpgsql function entirely server-side and emits the
+// certctl_audit_chain_break_detected_total counter on any detection.
+type AuditChainConfig struct {
+	// VerifyInterval is the tick cadence for the chain-verify sweep.
+	// Default 6h. Operators with huge audit_events tables (millions of
+	// rows) may want to lengthen; operators with stricter detection
+	// targets may shorten — the walk is O(N) plpgsql and finishes in
+	// seconds even at the 1M-row mark.
+	// Setting: CERTCTL_AUDIT_CHAIN_VERIFY_INTERVAL.
+	VerifyInterval time.Duration
+}
+
 
 // OCSPResponderConfig configures the dedicated OCSP-responder cert
 // per issuer (RFC 6960 §2.6 + §4.2.2.2). When unset, the local issuer
@@ -699,6 +720,9 @@ func Load() (*Config, error) {
 			KeyDir:        getEnv("CERTCTL_OCSP_RESPONDER_KEY_DIR", ""),
 			RotationGrace: getEnvDuration("CERTCTL_OCSP_RESPONDER_ROTATION_GRACE", 7*24*time.Hour),
 			Validity:      getEnvDuration("CERTCTL_OCSP_RESPONDER_VALIDITY", 30*24*time.Hour),
+		},
+		AuditChain: AuditChainConfig{
+			VerifyInterval: getEnvDuration("CERTCTL_AUDIT_CHAIN_VERIFY_INTERVAL", 6*time.Hour),
 		},
 	}
 

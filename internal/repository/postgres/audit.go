@@ -166,3 +166,40 @@ func (r *AuditRepository) List(ctx context.Context, filter *repository.AuditFilt
 
 	return events, nil
 }
+
+// VerifyHashChain calls the migration 000047 audit_events_verify_chain()
+// stored function and returns its three OUT parameters. This is the
+// Sprint 6 COMP-001-HASH tamper-evidence verifier — the scheduler's
+// auditChainVerifyLoop invokes it every CERTCTL_AUDIT_CHAIN_VERIFY_INTERVAL
+// tick and emits the certctl_audit_chain_break_detected counter on any
+// non-empty brokenAtID.
+//
+// The chain walk happens entirely server-side (plpgsql, STABLE). For an
+// audit_events table with N rows the cost is O(N) per call; we expect
+// modest fleets (single-digit-millions of events) so the per-tick cost
+// is bounded. Operators with very large audit tables can lengthen the
+// interval — the metric is sticky once incremented, so even an hourly
+// walk is enough lead time to surface tampering for human investigation.
+func (r *AuditRepository) VerifyHashChain(ctx context.Context) (brokenAtID string, brokenAtPos int, rowCount int, err error) {
+	var (
+		brokenID sql.NullString
+		pos      sql.NullInt32
+		total    sql.NullInt32
+	)
+	row := r.db.QueryRowContext(ctx, `SELECT first_break_id, first_break_pos, row_count FROM audit_events_verify_chain()`)
+	if err := row.Scan(&brokenID, &pos, &total); err != nil {
+		return "", -1, 0, fmt.Errorf("audit_events_verify_chain: %w", err)
+	}
+	if brokenID.Valid {
+		brokenAtID = brokenID.String
+	}
+	if pos.Valid {
+		brokenAtPos = int(pos.Int32)
+	} else {
+		brokenAtPos = -1
+	}
+	if total.Valid {
+		rowCount = int(total.Int32)
+	}
+	return brokenAtID, brokenAtPos, rowCount, nil
+}

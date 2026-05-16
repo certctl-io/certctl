@@ -768,6 +768,17 @@ func (m *mockAuditRepo) CreateWithTx(ctx context.Context, q repository.Querier, 
 	return m.Create(ctx, event)
 }
 
+// VerifyHashChain is the Sprint 6 COMP-001-HASH interface addition.
+// The in-memory mock has no chain; report "clean walk over N events"
+// so any service-layer caller that exercises the verifier sees
+// success in unit tests. Real chain semantics are covered in the
+// repository integration test.
+func (m *mockAuditRepo) VerifyHashChain(ctx context.Context) (string, int, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return "", -1, len(m.Events), nil
+}
+
 func (m *mockAuditRepo) List(ctx context.Context, filter *repository.AuditFilter) ([]*domain.AuditEvent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

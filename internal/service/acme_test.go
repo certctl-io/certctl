@@ -211,6 +211,13 @@ func (f *fakeAuditRepo) List(ctx context.Context, filter *repository.AuditFilter
 	return f.events, nil
 }
 
+// VerifyHashChain is the Sprint 6 COMP-001-HASH interface addition.
+// The fake has no chain; report "clean walk over N events" so any
+// caller that exercises the verifier sees success in unit tests.
+func (f *fakeAuditRepo) VerifyHashChain(ctx context.Context) (string, int, int, error) {
+	return "", -1, len(f.events), nil
+}
+
 // fakeProfileLookup is an in-memory profileLookup that returns the
 // profile by ID. Unknown IDs return repository.ErrNotFound (the
 // canonical sentinel ACMEService maps to ErrACMEProfileNotFound).

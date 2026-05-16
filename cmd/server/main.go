@@ -1043,6 +1043,12 @@ func main() {
 	// notification service uses to record per-(channel, threshold,
 	// result) outcomes.
 	metricsHandler.SetExpiryAlerts(expiryAlertMetrics)
+	// Sprint 6 COMP-001-HASH: audit_events tamper-evidence counters.
+	// Shared instance — the scheduler's auditChainVerifyLoop writes
+	// to it; the metrics handler reads from it. Wired into the
+	// scheduler below at sched.SetAuditChainBreakRecorder.
+	auditChainCounter := service.NewAuditChainCounter()
+	metricsHandler.SetAuditChainCounter(auditChainCounter)
 	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
 	// connectivity via PingContext. /health stays shallow (liveness signal).
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)
@@ -1240,6 +1246,18 @@ func main() {
 	} else {
 		logger.Info("rate-limit backend = memory; postgres GC sweep not wired (in-memory backend self-prunes)")
 	}
+	// Sprint 6 COMP-001-HASH: wire the audit_events chain-verify loop.
+	// The verifier is *postgres.AuditRepository (delegates to the
+	// migration 000047 audit_events_verify_chain() plpgsql function);
+	// the metric-side recorder is the same auditChainCounter the
+	// metrics handler reads above. Defaults to a 6h tick; operator
+	// overrides via CERTCTL_AUDIT_CHAIN_VERIFY_INTERVAL.
+	sched.SetAuditChainVerifier(auditRepo)
+	sched.SetAuditChainBreakRecorder(auditChainCounter)
+	sched.SetAuditChainVerifyInterval(cfg.AuditChain.VerifyInterval)
+	logger.Info("audit chain verify loop enabled",
+		"interval", cfg.AuditChain.VerifyInterval.String())
+
 	logger.Info("session GC sweep enabled",
 		"interval", cfg.Auth.Session.GCInterval.String(),
 		"absolute_timeout", cfg.Auth.Session.AbsoluteTimeout.String(),

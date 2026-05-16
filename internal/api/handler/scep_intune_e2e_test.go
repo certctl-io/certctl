@@ -170,6 +170,14 @@ func (r *intuneE2EAuditRepo) List(_ context.Context, _ *repository.AuditFilter) 
 	return nil, nil
 }
 
+// VerifyHashChain satisfies the Sprint 6 COMP-001-HASH interface
+// addition. In-memory stub: always clean.
+func (r *intuneE2EAuditRepo) VerifyHashChain(_ context.Context) (string, int, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return "", -1, len(r.events), nil
+}
+
 func (r *intuneE2EAuditRepo) actions() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

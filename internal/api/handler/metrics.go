@@ -102,6 +102,20 @@ type ExpiryAlertSnapshotter interface {
 	SnapshotExpiryAlerts() []service.ExpiryAlertSnapshotEntry
 }
 
+// AuditChainCounterSnapshotter is the surface MetricsHandler consumes
+// to emit the Sprint 6 COMP-001-HASH tamper-evidence counters:
+//
+//	certctl_audit_chain_break_detected_total counter
+//	certctl_audit_chain_verify_total          counter
+//	certctl_audit_chain_rows                  gauge
+//	certctl_audit_chain_last_verified_at      gauge (unix seconds)
+//
+// *service.AuditChainCounter satisfies this. nil disables emission;
+// cmd/server/main.go wires the instance at startup.
+type AuditChainCounterSnapshotter interface {
+	Snapshot() service.AuditChainSnapshot
+}
+
 // MetricsHandler handles HTTP requests for metrics.
 // Supports both JSON format (GET /api/v1/metrics) and Prometheus exposition format
 // (GET /api/v1/metrics/prometheus) for integration with Prometheus, Grafana, Datadog, etc.
@@ -129,6 +143,10 @@ type MetricsHandler struct {
 	// 2026-05-03 Infisical deep-research deliverable. nil disables
 	// emission of certctl_expiry_alerts_total{channel,threshold,result}.
 	expiryAlerts ExpiryAlertSnapshotter
+	// Sprint 6 COMP-001-HASH tamper-evidence counters. nil disables
+	// emission of certctl_audit_chain_* metrics. *service.AuditChainCounter
+	// is the production wiring; cmd/server/main.go sets this at startup.
+	auditChainCounter AuditChainCounterSnapshotter
 }
 
 // NewMetricsHandler creates a new MetricsHandler with a service dependency.
@@ -175,6 +193,14 @@ func (h *MetricsHandler) SetVaultRenewals(c VaultRenewalSnapshotter) {
 // deliverable.
 func (h *MetricsHandler) SetExpiryAlerts(c ExpiryAlertSnapshotter) {
 	h.expiryAlerts = c
+}
+
+// SetAuditChainCounter wires the Sprint 6 COMP-001-HASH tamper-evidence
+// counters for the Prometheus exposition. nil disables the block.
+// The counter is also passed to scheduler.SetAuditChainBreakRecorder so
+// the verify loop writes to the same instance the handler reads.
+func (h *MetricsHandler) SetAuditChainCounter(c AuditChainCounterSnapshotter) {
+	h.auditChainCounter = c
 }
 
 // MetricsResponse represents the JSON metrics response for V2.
@@ -522,6 +548,29 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 					e.Channel, strconv.Itoa(e.Threshold), e.Result, e.Count)
 			}
 		}
+	}
+
+	// Sprint 6 COMP-001-HASH tamper-evidence counters. Emitted as four
+	// adjacent series so an alert rule can fire on any non-zero
+	// certctl_audit_chain_break_detected_total (the operator-actionable
+	// signal — see docs/operator/audit-chain.md).
+	if h.auditChainCounter != nil {
+		snap := h.auditChainCounter.Snapshot()
+		fmt.Fprintf(w, "\n# HELP certctl_audit_chain_break_detected_total Number of audit_events hash-chain breaks detected (Sprint 6 COMP-001-HASH).\n")
+		fmt.Fprintf(w, "# TYPE certctl_audit_chain_break_detected_total counter\n")
+		fmt.Fprintf(w, "certctl_audit_chain_break_detected_total %d\n", snap.BreaksDetected)
+
+		fmt.Fprintf(w, "# HELP certctl_audit_chain_verify_total Number of audit_events_verify_chain() walks completed by the scheduler.\n")
+		fmt.Fprintf(w, "# TYPE certctl_audit_chain_verify_total counter\n")
+		fmt.Fprintf(w, "certctl_audit_chain_verify_total %d\n", snap.WalksCompleted)
+
+		fmt.Fprintf(w, "# HELP certctl_audit_chain_rows Most recent walk's row count (gauge — last-write-wins).\n")
+		fmt.Fprintf(w, "# TYPE certctl_audit_chain_rows gauge\n")
+		fmt.Fprintf(w, "certctl_audit_chain_rows %d\n", snap.LastRowCount)
+
+		fmt.Fprintf(w, "# HELP certctl_audit_chain_last_verified_at Unix seconds of most recent walk (0 = never).\n")
+		fmt.Fprintf(w, "# TYPE certctl_audit_chain_last_verified_at gauge\n")
+		fmt.Fprintf(w, "certctl_audit_chain_last_verified_at %d\n", snap.LastVerifiedAtUnix)
 	}
 }
 

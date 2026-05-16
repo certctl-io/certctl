@@ -499,6 +499,21 @@ type AuditRepository interface {
 	CreateWithTx(ctx context.Context, q Querier, event *domain.AuditEvent) error
 	// List returns audit events matching the filter criteria.
 	List(ctx context.Context, filter *AuditFilter) ([]*domain.AuditEvent, error)
+	// VerifyHashChain walks the per-row hash chain end-to-end (migration
+	// 000047 closure of Sprint 6 COMP-001-HASH) and returns the first
+	// break it finds. brokenAtID == "" + brokenAtPos == -1 means the
+	// chain validated; rowCount is the number of rows walked.
+	//
+	// Tamper-evidence layer that complements migration 000018's WORM
+	// trigger: WORM blocks the app role from UPDATE / DELETE, but a
+	// compliance superuser bypasses that trigger by design (retention
+	// purges, breach-recovery). Without the hash chain, such a role
+	// could rewrite history without detection. The scheduler's
+	// auditChainVerifyLoop calls this every
+	// CERTCTL_AUDIT_CHAIN_VERIFY_INTERVAL tick + increments the
+	// certctl_audit_chain_break_detected counter on a non-empty
+	// brokenAtID return.
+	VerifyHashChain(ctx context.Context) (brokenAtID string, brokenAtPos int, rowCount int, err error)
 }
 
 // NotificationRepository defines operations for managing notifications.
