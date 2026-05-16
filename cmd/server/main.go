@@ -41,6 +41,7 @@ import (
 	"github.com/certctl-io/certctl/internal/crypto/signer"
 	"github.com/certctl-io/certctl/internal/domain"
 	authdomainAlias "github.com/certctl-io/certctl/internal/domain/auth"
+	"github.com/certctl-io/certctl/internal/observability"
 	"github.com/certctl-io/certctl/internal/ratelimit"
 	"github.com/certctl-io/certctl/internal/repository/postgres"
 	"github.com/certctl-io/certctl/internal/scep/intune"
@@ -156,6 +157,36 @@ func main() {
 	validation.SetBlockRFC1918Outbound(cfg.Network.BlockRFC1918Outbound)
 	if cfg.Network.BlockRFC1918Outbound {
 		logger.Info("RFC1918 outbound block ENABLED (CERTCTL_BLOCK_RFC1918_OUTBOUND=true) — 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 are reserved for outbound HTTP egress AND for the network scanner")
+	}
+
+	// Acquisition-audit DEPL-006 closure (Sprint 6 ACQ, 2026-05-16).
+	// Optional OpenTelemetry seed. Init returns a no-op shutdown when
+	// CERTCTL_OTEL_ENABLED is unset/false — defer'ing it
+	// unconditionally is safe. The OTLP gRPC client connects lazily,
+	// so an unreachable collector surfaces as failed export attempts
+	// in the SDK's internal error log, NOT as a boot-time failure.
+	//
+	// Sprint 6 stands up the surface only — no per-handler /
+	// per-query / per-connector spans are emitted yet (v2.3 roadmap
+	// follow-up). Operators enabling the toggle today see process-
+	// level resource attributes and any spans the OTel SDK emits
+	// internally; no certctl-domain spans until v2.3.
+	otelShutdown, err := observability.Init(context.Background(), observability.Config{
+		Enabled: cfg.Observability.OTelEnabled,
+	})
+	if err != nil {
+		logger.Error("failed to initialize OpenTelemetry", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Warn("OpenTelemetry shutdown returned error", "error", err)
+		}
+	}()
+	if cfg.Observability.OTelEnabled {
+		logger.Info("OpenTelemetry tracing ENABLED (CERTCTL_OTEL_ENABLED=true) — OTLP/gRPC exporter wired; honors OTEL_EXPORTER_OTLP_ENDPOINT + other OTEL_* env vars. Per-handler instrumentation is a v2.3 roadmap follow-up; this release stands up the surface only.")
 	}
 
 	// Phase 6 SCALE-M3 closure (2026-05-14): operator-overridable

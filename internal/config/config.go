@@ -118,6 +118,39 @@ type Config struct {
 	// only field is BlockRFC1918Outbound; future egress-policy knobs
 	// (per-host allowlists, max-dial-time overrides) go here.
 	Network NetworkConfig
+	// Observability holds the optional OpenTelemetry seed config.
+	// Acquisition-audit DEPL-006 closure (Sprint 6 ACQ, 2026-05-16).
+	// Default Enabled=false — operators opt in via CERTCTL_OTEL_ENABLED=true.
+	Observability ObservabilityConfig
+}
+
+// ObservabilityConfig is the operator-facing config surface for the
+// OTel seed. Acquisition-audit DEPL-006 closure (Sprint 6 ACQ,
+// 2026-05-16). Plumbed through to internal/observability.Init at
+// boot from cmd/server/main.go.
+//
+// The single gate is CERTCTL_OTEL_ENABLED. Everything else (endpoint,
+// headers, protocol, service name, resource attributes) flows
+// through the standard OTEL_* env vars the OTel SDK's
+// resource.WithFromEnv + otlptracehttp.New honor directly — no
+// certctl-specific re-implementation of those env vars (avoids the
+// "lying field" footgun where an env var exists in code but doesn't
+// reach the consumer).
+type ObservabilityConfig struct {
+	// OTelEnabled gates the optional OpenTelemetry tracer-provider
+	// initialization. Default false (zero behavior change for
+	// operators who don't opt in). When true, the boot path wires
+	// up an OTLP/HTTP exporter and registers it as the otel global
+	// tracer provider. CERTCTL_OTEL_ENABLED.
+	//
+	// Per-handler / per-query / per-connector span instrumentation
+	// is NOT added by Sprint 6 — this commit stands up the surface
+	// only; instrumentation is a v2.3 follow-up. Operators who
+	// enable the toggle today will see process-level resource
+	// attributes and (eventually) any spans the OTel SDK emits
+	// from its own internal paths, but no certctl-domain spans
+	// until the v2.3 work lands.
+	OTelEnabled bool
 }
 
 // NetworkConfig is the outbound-egress policy surface for certctl.
@@ -796,6 +829,19 @@ func Load() (*Config, error) {
 		// cmd/server/main.go.
 		Network: NetworkConfig{
 			BlockRFC1918Outbound: getEnvBool("CERTCTL_BLOCK_RFC1918_OUTBOUND", false),
+		},
+		// Acquisition-audit DEPL-006 closure (Sprint 6 ACQ,
+		// 2026-05-16). Optional OpenTelemetry seed. Default Enabled=false
+		// preserves zero-overhead behavior for operators who don't opt
+		// in; the boot path calls observability.Init unconditionally
+		// (observability.Init short-circuits to a no-op shutdown when
+		// disabled). Operators set CERTCTL_OTEL_ENABLED=true plus the
+		// standard OTEL_* env vars (OTEL_EXPORTER_OTLP_ENDPOINT, etc.)
+		// to wire spans to their collector. Per-handler / per-query
+		// instrumentation is a v2.3 roadmap follow-up; this sprint
+		// stands up the surface only.
+		Observability: ObservabilityConfig{
+			OTelEnabled: getEnvBool("CERTCTL_OTEL_ENABLED", false),
 		},
 	}
 
