@@ -76,27 +76,30 @@ func main() {
 	// the slog logger is constructed from cfg below this point; we want
 	// the failure to be visible regardless of log-level configuration.
 	//
-	// Auth Bundle 2 Phase 0: AuthTypeOIDC is in ValidAuthTypes() but the
-	// session middleware + OIDC handler chain ship in later phases. An
-	// operator who sets CERTCTL_AUTH_TYPE=oidc on a Bundle-2-incomplete
-	// deployment must NOT silently fall back to api-key (the silent
-	// auth-downgrade failure mode that drove G-1 in the first place).
-	// The OIDC case below refuses-to-start with an actionable message.
-	// Phase 6 of Bundle 2 (session middleware wiring) relaxes this case
-	// to fall through alongside the api-key + none cases.
-	switch config.AuthType(cfg.Auth.Type) {
-	case config.AuthTypeAPIKey, config.AuthTypeNone:
-		// ok — fall through
-	case config.AuthTypeOIDC:
-		fmt.Fprintf(os.Stderr,
-			"CERTCTL_AUTH_TYPE=oidc: the OIDC auth chain is not yet wired in this build (Auth Bundle 2 Phase 6 ships the session middleware that consumes this auth-type literal). Set CERTCTL_AUTH_TYPE=api-key or run an authenticating gateway with CERTCTL_AUTH_TYPE=none until Bundle 2 lands. See cowork/auth-bundle-2-prompt.md.\n")
-		os.Exit(1)
-	default:
+	// ARCH-002 closure (Sprint 4, 2026-05-16). Auth Bundle 2 is now
+	// fully wired: session.NewService at L394 + oidcsvc.NewService at
+	// L436 + ChainAuthSessionThenBearer at L2012 + the OIDC handler
+	// routes (`/auth/oidc/login`, `/auth/oidc/callback`,
+	// `/auth/oidc/back-channel-logout`) registered in
+	// internal/api/router/router.go. The pre-ARCH-002 Phase-0 guard
+	// that exited on AuthTypeOIDC made sense when the handler chain
+	// was a stub; it became a stale fail-loud after Phase 6 shipped
+	// and is the only thing that stopped CERTCTL_AUTH_TYPE=oidc from
+	// being a viable production auth mode.
+	//
+	// Post-fix: oidc falls through alongside api-key + none. The
+	// G-1 silent-auth-downgrade invariant stays intact — "jwt" is
+	// still rejected at config.Validate() time (it never made it
+	// into ValidAuthTypes()) and the default branch below still
+	// refuses any other unrecognised value at runtime.
+	if !config.IsRuntimeSupportedAuthType(config.AuthType(cfg.Auth.Type)) {
 		fmt.Fprintf(os.Stderr,
 			"unsupported auth type at runtime: %q (valid: %v) — config validation should have caught this; refusing to start\n",
 			cfg.Auth.Type, config.ValidAuthTypes())
 		os.Exit(1)
 	}
+	// ok — all three modes (api-key / none / oidc) route through the
+	// chained session-then-Bearer auth middleware constructed at L2011.
 
 	// Set up structured logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{

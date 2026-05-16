@@ -1969,3 +1969,140 @@ func TestExpandDatabaseURL_MultipleOccurrences(t *testing.T) {
 		t.Errorf("expandDatabaseURL = %q; want %q", got, want)
 	}
 }
+
+// =============================================================================
+// ARCH-002 closure (Sprint 4, 2026-05-16). Auth Bundle 2 Phase 6
+// shipped the OIDC session middleware + handler chain in code, but
+// cmd/server/main.go retained a Phase-0 runtime guard that exited
+// the process when CERTCTL_AUTH_TYPE=oidc. The guard was supposed
+// to relax once the prerequisites landed; it didn't, and the
+// README's "Sign in with OIDC SSO" claim was effectively a lie
+// because the server refused to start with auth=oidc.
+//
+// Post-fix the runtime gate is centralised at
+// config.IsRuntimeSupportedAuthType and accepts every entry in
+// ValidAuthTypes(). These tests pin the new invariant — the
+// runtime support set MUST equal the validator's allowed set.
+// A future regression that flips back to "OIDC not supported"
+// surfaces here.
+// =============================================================================
+
+func TestIsRuntimeSupportedAuthType_AcceptsAllValidEntries(t *testing.T) {
+	t.Parallel()
+	for _, at := range ValidAuthTypes() {
+		if !IsRuntimeSupportedAuthType(at) {
+			t.Errorf("IsRuntimeSupportedAuthType(%q) = false; want true (every valid auth type must be runtime-supported)", at)
+		}
+	}
+}
+
+func TestIsRuntimeSupportedAuthType_AcceptsOIDC(t *testing.T) {
+	// Explicit ARCH-002 invariant — OIDC must boot cleanly.
+	t.Parallel()
+	if !IsRuntimeSupportedAuthType(AuthTypeOIDC) {
+		t.Fatalf("IsRuntimeSupportedAuthType(oidc) = false; the Bundle-2 stale runtime guard regressed (ARCH-002)")
+	}
+}
+
+func TestIsRuntimeSupportedAuthType_RejectsUnknown(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []AuthType{"", "jwt", "saml", "mtls", "API-KEY"} {
+		if IsRuntimeSupportedAuthType(bad) {
+			t.Errorf("IsRuntimeSupportedAuthType(%q) = true; want false (unknown auth types must be rejected)", bad)
+		}
+	}
+}
+
+// =============================================================================
+// ARCH-003 closure (Sprint 4, 2026-05-16). README claimed "private
+// keys stay on your infrastructure" / "never touch the control plane"
+// as a blanket promise. CERTCTL_KEYGEN_MODE=server breaks both — keys
+// are minted in the server process and shipped to the renewal job.
+// Pre-fix the server printed a boot WARN and started anyway, so the
+// blanket claim was silently false in any deploy that flipped the flag
+// without reading logs.
+//
+// Post-fix Validate() refuses to accept Mode=server unless
+// CERTCTL_DEMO_MODE_ACK=true is also set (mirroring the SEC-H3
+// 24-hour ACK pattern). Production deploys must use Mode=agent.
+// =============================================================================
+
+func TestValidate_RejectsServerKeygenWithoutDemoAck(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{
+		Server:   validServerConfig(t),
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "x", DemoModeAck: false},
+		Keygen:   KeygenConfig{Mode: "server"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatalf("Validate(KeygenMode=server, DemoAck=false) returned nil; want fail-closed rejection")
+	}
+	if !strings.Contains(err.Error(), "CERTCTL_KEYGEN_MODE=server") {
+		t.Errorf("Validate err = %v; want error citing CERTCTL_KEYGEN_MODE=server", err)
+	}
+}
+
+func TestValidate_AcceptsServerKeygenWithDemoAck(t *testing.T) {
+	t.Parallel()
+	// Operators who explicitly acknowledge the demo posture get to boot
+	// in server-keygen mode. Same pattern SEC-H3 uses for AUTH_TYPE=none.
+	tsRecent := strconv.FormatInt(time.Now().Unix(), 10)
+	cfg := &Config{
+		Server:   validServerConfig(t),
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth: AuthConfig{
+			Type:          "api-key",
+			Secret:        "x",
+			DemoModeAck:   true,
+			DemoModeAckTS: tsRecent,
+		},
+		Keygen: KeygenConfig{Mode: "server"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate(KeygenMode=server, DemoAck=true, fresh TS) = %v; want nil", err)
+	}
+}
+
+func TestValidate_AgentKeygenIgnoresDemoAck(t *testing.T) {
+	t.Parallel()
+	// The new gate must NOT regress production deploys — agent mode
+	// (the default) boots cleanly without any demo ACK.
+	cfg := &Config{
+		Server:   validServerConfig(t),
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "x", DemoModeAck: false},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate(KeygenMode=agent, DemoAck=false) = %v; want nil (production default must boot)", err)
+	}
+}

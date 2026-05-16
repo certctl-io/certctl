@@ -138,15 +138,13 @@ const (
 	// docs/architecture.md "Authenticating-gateway pattern".
 	AuthTypeNone AuthType = "none"
 
-	// AuthTypeOIDC (Auth Bundle 2 Phase 0) reserves the literal that the
-	// OIDC handler chain (Bundle 2 Phase 5+6) consumes. Pre-Bundle-2
-	// behavior: the literal is allowed by the validator but the handler
-	// chain is not yet wired, so the runtime guard in cmd/server/main.go
-	// surfaces a clear "oidc auth-type configured but Bundle 2 handlers
-	// not registered" error rather than silently falling back to api-key
-	// (the failure mode that drove G-1's jwt-literal removal). Once
-	// Bundle 2's session middleware + OIDC service ship, the runtime
-	// guard relaxes and CERTCTL_AUTH_TYPE=oidc routes through them.
+	// AuthTypeOIDC drives the OIDC SSO handler chain (Bundle 2 Phase 5+6).
+	// ARCH-002 closure (Sprint 4, 2026-05-16): the Phase-0 runtime guard
+	// at cmd/server/main.go that refused to boot on this literal has
+	// been relaxed — every prerequisite (session.NewService,
+	// oidcsvc.NewService, ChainAuthSessionThenBearer, the OIDC handler
+	// routes) ships, so CERTCTL_AUTH_TYPE=oidc is now a fully-supported
+	// production auth mode alongside api-key + none.
 	//
 	// Note: this is the AUTH-TYPE literal value, NOT the JWT alg literal.
 	// ID tokens are JWTs internally but the auth-type config string is
@@ -169,6 +167,24 @@ const (
 // regress.
 func ValidAuthTypes() []AuthType {
 	return []AuthType{AuthTypeAPIKey, AuthTypeNone, AuthTypeOIDC}
+}
+
+// IsRuntimeSupportedAuthType reports whether the cmd/server/main.go
+// runtime guard accepts this auth-type literal at boot. ARCH-002
+// closure (Sprint 4, 2026-05-16): post-fix this returns true for
+// every entry in ValidAuthTypes() — the Bundle-2-Phase-0 stale guard
+// that exited on AuthTypeOIDC has been relaxed, since the full
+// session middleware + OIDC handler chain ships. The helper exists
+// as a single source of truth so the test suite can pin the
+// invariant `ValidAuthTypes ⊆ runtime-supported` (which protects
+// against future drift in either direction).
+func IsRuntimeSupportedAuthType(t AuthType) bool {
+	switch t {
+	case AuthTypeAPIKey, AuthTypeNone, AuthTypeOIDC:
+		return true
+	default:
+		return false
+	}
 }
 
 // AuthConfig contains authentication configuration.
